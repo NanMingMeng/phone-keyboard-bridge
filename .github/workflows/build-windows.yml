@@ -1,0 +1,27 @@
+name: build-windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+      - name: Build exe
+        run: python -m PyInstaller --noconfirm --clean --onefile --console --name PhoneKeyboardBridge --add-data "phone_keyboard/templates;phone_keyboard/templates" run.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhoneKeyboardBridge-windows
+          path: dist/PhoneKeyboardBridge.exe

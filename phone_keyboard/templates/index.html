@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>手机键盘桥</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f4f6f8; color: #1f2933;
+  }
+  header { padding: 18px 18px 10px; }
+  h1 { margin: 0 0 8px; font-size: 22px; font-weight: 650; }
+  header p { margin: 0; color: #52606d; font-size: 14px; line-height: 1.6; }
+  main { padding: 0 14px 24px; }
+  textarea {
+    width: 100%; min-height: 220px; padding: 14px;
+    border: 1px solid #cbd2d9; border-radius: 12px;
+    background: #fff; color: #1f2933;
+    font-size: 17px; line-height: 1.6; resize: vertical;
+    outline: none;
+  }
+  textarea:focus { border-color: #2f6fed; box-shadow: 0 0 0 3px rgba(47,111,237,.12); }
+  .row { display: flex; align-items: center; gap: 8px; margin: 12px 2px; color: #3e4c59; font-size: 14px; }
+  .row input { width: 18px; height: 18px; }
+  .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button {
+    border: 0; border-radius: 12px; padding: 14px 12px;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+  }
+  button.primary { background: #2f6fed; color: #fff; grid-column: 1 / -1; }
+  button.secondary { background: #e4e7eb; color: #1f2933; }
+  button:disabled { opacity: .55; cursor: default; }
+  .divider { margin: 18px 2px 12px; border-top: 1px solid #d9e2ec; }
+  .section-title { margin: 0 2px 8px; font-size: 16px; font-weight: 650; }
+  .image-box { display: grid; gap: 10px; }
+  .image-pick {
+    display: flex; align-items: center; justify-content: center;
+    border: 1px dashed #9fb3c8; border-radius: 12px;
+    padding: 14px; background: #fff; color: #3e4c59; font-size: 15px;
+  }
+  .image-pick input { display: none; }
+  #preview { display: none; max-width: 100%; max-height: 220px; border-radius: 10px; }
+  .image-buttons { display: grid; gap: 10px; }
+  .image-buttons button { width: 100%; }
+  .status { min-height: 22px; margin: 12px 2px 0; color: #0b6b3a; font-size: 14px; line-height: 1.6; }
+  .status.error { color: #b42318; }
+  .hint { margin: 10px 2px 0; color: #7b8794; font-size: 13px; line-height: 1.6; }
+  footer { padding: 0 16px 24px; color: #9aa5b1; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>手机键盘桥</h1>
+  <p>先在电脑上点一下目标输入框，让它处于可输入状态，再在这里打字或选图片。</p>
+</header>
+<main>
+  <textarea id="text" autofocus placeholder="在这里打字，支持中文输入法和语音输入……"></textarea>
+  <label class="row"><input type="checkbox" id="enter"> 粘贴后按回车发送</label>
+  <div class="buttons">
+    <button class="primary" id="paste">粘贴到电脑</button>
+    <button class="secondary" id="copy">只复制</button>
+    <button class="secondary" id="clear">清空</button>
+  </div>
+
+  <div class="divider"></div>
+  <p class="section-title">发图片</p>
+  <div class="image-box">
+    <label class="image-pick">
+      选择图片 / 拍照
+      <input type="file" id="image" accept="image/*">
+    </label>
+    <img id="preview" alt="图片预览">
+    <label class="row"><input type="checkbox" id="autoImage" checked> 选完图片自动粘贴</label>
+    <div class="image-buttons">
+      <button class="primary" id="sendImage">粘贴图片到电脑</button>
+      <button class="secondary" id="saveImage">只保存图片</button>
+    </div>
+  </div>
+
+  <p class="status" id="status"></p>
+  <p class="hint">如果文字或图片去了错误的地方，先在电脑上点一下目标输入框，再重试一次。</p>
+</main>
+<footer>Phone Keyboard Bridge v__VERSION__ · LAN only</footer>
+<script>
+const TOKEN = __TOKEN__;
+const textEl = document.getElementById('text');
+const statusEl = document.getElementById('status');
+const enterEl = document.getElementById('enter');
+const imageEl = document.getElementById('image');
+const previewEl = document.getElementById('preview');
+const autoImageEl = document.getElementById('autoImage');
+const buttons = ['paste','copy','clear'].map(id => document.getElementById(id));
+const imageButtons = ['sendImage','saveImage'].map(id => document.getElementById(id));
+
+const saved = localStorage.getItem('phone-keyboard-text');
+if (saved) textEl.value = saved;
+textEl.addEventListener('input', () => localStorage.setItem('phone-keyboard-text', textEl.value));
+
+function setStatus(message, isError) {
+  statusEl.textContent = message;
+  statusEl.classList.toggle('error', !!isError);
+}
+
+async function send(mode) {
+  const text = textEl.value;
+  if (!text.trim()) { setStatus('先输入一点文字。', true); return; }
+  buttons.forEach(b => b.disabled = true);
+  setStatus('正在发送……');
+  try {
+    const response = await fetch('/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Token': TOKEN },
+      body: JSON.stringify({ text, mode, enter: enterEl.checked })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '发送失败');
+    if (mode === 'paste') {
+      textEl.value = '';
+      localStorage.removeItem('phone-keyboard-text');
+      textEl.focus();
+    }
+    setStatus(mode === 'paste' ? '已粘贴到电脑，输入框已清空。' : '已复制到电脑剪贴板。');
+  } catch (error) {
+    setStatus(error.message || '发送失败', true);
+  } finally {
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+async function sendImage(mode) {
+  const file = imageEl.files[0];
+  if (!file) { setStatus('先选择一张图片。', true); return; }
+  imageButtons.forEach(b => b.disabled = true);
+  setStatus(mode === 'paste' ? '正在发送图片……' : '正在保存图片……');
+  try {
+    const response = await fetch('/send-image', {
+      method: 'POST',
+      headers: {
+        'X-Token': TOKEN,
+        'X-Filename': encodeURIComponent(file.name || 'image'),
+        'X-Mode': mode
+      },
+      body: file
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || '发送失败');
+    if (data.pasted) {
+      setStatus('图片已粘贴到电脑。');
+    } else if (data.warning) {
+      setStatus(`图片已保存，但自动粘贴失败：${data.warning}\n保存位置：${data.path}`, true);
+    } else {
+      setStatus(`图片已保存：${data.path}`);
+    }
+    imageEl.value = '';
+    previewEl.style.display = 'none';
+    previewEl.removeAttribute('src');
+  } catch (error) {
+    setStatus(error.message || '发送失败', true);
+  } finally {
+    imageButtons.forEach(b => b.disabled = false);
+  }
+}
+
+document.getElementById('paste').addEventListener('click', () => send('paste'));
+document.getElementById('copy').addEventListener('click', () => send('copy'));
+document.getElementById('clear').addEventListener('click', () => {
+  textEl.value = '';
+  localStorage.removeItem('phone-keyboard-text');
+  textEl.focus();
+  setStatus('已清空。');
+});
+
+imageEl.addEventListener('change', () => {
+  const file = imageEl.files[0];
+  if (!file) {
+    previewEl.style.display = 'none';
+    previewEl.removeAttribute('src');
+    return;
+  }
+  previewEl.src = URL.createObjectURL(file);
+  previewEl.style.display = 'block';
+  setStatus('已选择图片：' + file.name);
+  if (autoImageEl.checked) sendImage('paste');
+});
+
+document.getElementById('sendImage').addEventListener('click', () => sendImage('paste'));
+document.getElementById('saveImage').addEventListener('click', () => sendImage('save'));
+</script>
+</body>
+</html>
