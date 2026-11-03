@@ -2,6 +2,8 @@
 
 用手机给 Windows 电脑打字：手机浏览器打开一个局域网页面，输入文字或选择图片，电脑当前窗口自动收到粘贴内容。
 
+> 下载 Windows 版：[GitHub Releases](https://github.com/NanMingMeng/phone-keyboard-bridge/releases/latest)
+
 > 适合不想用电脑键盘，但必须在 Codex、微信、浏览器、编辑器里打字的人。
 > 不需要安装手机 App，不需要云服务，数据只走你自己的局域网。
 
