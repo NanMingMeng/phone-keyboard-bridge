@@ -20,8 +20,8 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt pyinstaller
       - name: Build exe
-        run: python -m PyInstaller --noconfirm --clean --onefile --console --name PhoneKeyboardBridge --add-data "phone_keyboard/templates;phone_keyboard/templates" run.py
+        run: python -m PyInstaller --noconfirm --clean --onefile --windowed --name PKB --icon assets/icon.ico --add-data "phone_keyboard/templates;phone_keyboard/templates" --add-data "assets;assets" --hidden-import PyQt6.QtSvg --hidden-import PyQt6.QtSvgWidgets run_desktop.py
       - uses: actions/upload-artifact@v4
         with:
-          name: PhoneKeyboardBridge-windows
-          path: dist/PhoneKeyboardBridge.exe
+          name: PKB-windows
+          path: dist/PKB.exe

@@ -12,7 +12,7 @@ if %errorlevel%==0 (
 :run
 ".venv\Scripts\python.exe" -m pip install -r requirements.txt
 if errorlevel 1 goto fail
-".venv\Scripts\python.exe" run.py --open-qr
+".venv\Scripts\python.exe" run_desktop.py
 goto end
 :fail
 echo.

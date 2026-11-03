@@ -172,8 +172,12 @@ class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
-def run_server(settings: Settings, template: str) -> None:
+def create_server(settings: Settings, template: str) -> ThreadingHTTPServer:
     handler = make_handler(settings, template)
-    server = _Server((settings.host, settings.port), handler)
+    return _Server((settings.host, settings.port), handler)
+
+
+def run_server(settings: Settings, template: str) -> None:
+    server = create_server(settings, template)
     LOGGER.info("Listening on %s:%s", settings.host, settings.port)
     server.serve_forever()

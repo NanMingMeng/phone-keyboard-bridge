@@ -10,6 +10,6 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 }
 
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
-.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onefile --console --name PhoneKeyboardBridge --add-data "phone_keyboard/templates;phone_keyboard/templates" run.py
+.\.venv\Scripts\python.exe -m PyInstaller --noconfirm --clean --onefile --windowed --name PKB --icon assets/icon.ico --add-data "phone_keyboard/templates;phone_keyboard/templates" --add-data "assets;assets" --hidden-import PyQt6.QtSvg --hidden-import PyQt6.QtSvgWidgets run_desktop.py
 Write-Host ""
-Write-Host "Built: dist\PhoneKeyboardBridge.exe"
+Write-Host "Built: dist\PKB.exe"
