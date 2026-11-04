@@ -11,6 +11,7 @@ from typing import Any
 
 from .clipboard import copy_text, paste_image, paste_text
 from .config import Settings
+from .connections import ConnectionTracker
 
 LOGGER = logging.getLogger("phone_keyboard.server")
 ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
@@ -23,7 +24,7 @@ def safe_image_stem(name: str) -> str:
     return stem or "image"
 
 
-def make_handler(settings: Settings, template: str):
+def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"PhoneKeyboardBridge/{settings.version}"
 
@@ -41,6 +42,16 @@ def make_handler(settings: Settings, template: str):
 
         def _authorized(self) -> bool:
             return self.headers.get("X-Token") == settings.token
+
+        def _client_ip(self) -> str:
+            return str(self.client_address[0])
+
+        def _track(self, action: str | None = None) -> None:
+            tracker.touch(
+                self._client_ip(),
+                self.headers.get("User-Agent", ""),
+                action,
+            )
 
         def _read_body(self, limit: int) -> bytes:
             length = int(self.headers.get("Content-Length", "0"))
@@ -63,6 +74,7 @@ def make_handler(settings: Settings, template: str):
                     self.end_headers()
                     self.wfile.write("Invalid link. Scan the QR code again.".encode("utf-8"))
                     return
+                self._track("打开手机页面")
                 body = (
                     template
                     .replace("__TOKEN__", json.dumps(settings.token))
@@ -92,7 +104,17 @@ def make_handler(settings: Settings, template: str):
             if self.path == "/send-image":
                 self._handle_image()
                 return
+            if self.path == "/heartbeat":
+                self._handle_heartbeat()
+                return
             self._send_json(404, {"error": "Not found"})
+
+        def _handle_heartbeat(self) -> None:
+            if not self._authorized():
+                self._send_json(403, {"error": "Invalid link"})
+                return
+            self._track()
+            self._send_json(200, {"ok": True})
 
         def _handle_text(self) -> None:
             if not self._authorized():
@@ -108,12 +130,14 @@ def make_handler(settings: Settings, template: str):
                     return
                 if mode == "copy":
                     copy_text(text)
+                    self._track("复制文字")
                     self._send_json(200, {"ok": True, "copied": True})
                     return
                 if mode != "paste":
                     self._send_json(400, {"error": "Invalid mode"})
                     return
                 paste_text(text, press_enter=press_enter)
+                self._track("粘贴文字")
                 self._send_json(200, {"ok": True, "pasted": True})
             except RuntimeError as error:
                 self._send_json(501, {"error": str(error)})
@@ -142,10 +166,12 @@ def make_handler(settings: Settings, template: str):
                 path.write_bytes(data)
 
                 if mode == "save":
+                    self._track("保存图片")
                     self._send_json(200, {"ok": True, "saved": True, "pasted": False, "path": str(path)})
                     return
                 try:
                     paste_image(path)
+                    self._track("粘贴图片")
                     self._send_json(200, {"ok": True, "saved": True, "pasted": True, "path": str(path)})
                 except RuntimeError as error:
                     self._send_json(
@@ -172,9 +198,16 @@ class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
-def create_server(settings: Settings, template: str) -> ThreadingHTTPServer:
-    handler = make_handler(settings, template)
-    return _Server((settings.host, settings.port), handler)
+def create_server(
+    settings: Settings,
+    template: str,
+    tracker: ConnectionTracker | None = None,
+) -> ThreadingHTTPServer:
+    tracker = tracker or ConnectionTracker()
+    handler = make_handler(settings, template, tracker)
+    server = _Server((settings.host, settings.port), handler)
+    server.tracker = tracker
+    return server
 
 
 def run_server(settings: Settings, template: str) -> None:

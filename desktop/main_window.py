@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -66,6 +67,7 @@ class MainWindow(QMainWindow):
         self.template = ""
         self.settings: Settings | None = None
         self.phone_url = ""
+        self.last_lan_ip = ""
         self.start_error: str | None = None
         self.last_log_size = -1
 
@@ -76,6 +78,14 @@ class MainWindow(QMainWindow):
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self._refresh_logs)
         self.log_timer.start(1200)
+
+        self.device_timer = QTimer(self)
+        self.device_timer.timeout.connect(self._refresh_devices)
+        self.device_timer.start(1000)
+
+        self.network_timer = QTimer(self)
+        self.network_timer.timeout.connect(self._refresh_network_info)
+        self.network_timer.start(3000)
 
         self.theme_timer = QTimer(self)
         self.theme_timer.timeout.connect(self._check_theme)
@@ -168,9 +178,20 @@ class MainWindow(QMainWindow):
 
     def _build_connection_page(self) -> QWidget:
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 8, 0)
         layout.setSpacing(16)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
 
         layout.addWidget(PageHeader("连接", "手机和电脑在同一个局域网即可使用。"))
 
@@ -204,6 +225,41 @@ class MainWindow(QMainWindow):
         self.status_hint.setWordWrap(True)
         status_layout.addWidget(self.status_hint)
         layout.addWidget(self.status_card)
+
+        self.devices_card = Card()
+        devices_layout = QVBoxLayout(self.devices_card)
+        devices_layout.setContentsMargins(22, 18, 22, 18)
+        devices_layout.setSpacing(10)
+
+        devices_header = QHBoxLayout()
+        devices_header.setSpacing(10)
+        devices_title = QLabel("连接设备")
+        devices_title.setObjectName("h2")
+        self.devices_count = QLabel("0 台在线")
+        self.devices_count.setObjectName("pill")
+        copy_diag_btn = QPushButton("复制诊断信息")
+        copy_diag_btn.setObjectName("secondary")
+        copy_diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        copy_diag_btn.setIcon(svg_icon("copy", "#6B7280", 16))
+        copy_diag_btn.clicked.connect(self._copy_diagnostics)
+        devices_header.addWidget(devices_title)
+        devices_header.addWidget(self.devices_count)
+        devices_header.addStretch(1)
+        devices_header.addWidget(copy_diag_btn)
+        devices_layout.addLayout(devices_header)
+
+        self.devices_empty = QLabel("暂无设备连接。手机扫码打开页面后，这里会显示设备信息。")
+        self.devices_empty.setObjectName("muted")
+        self.devices_empty.setWordWrap(True)
+        devices_layout.addWidget(self.devices_empty)
+
+        self.device_rows = QWidget()
+        self.device_rows_layout = QVBoxLayout(self.device_rows)
+        self.device_rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.device_rows_layout.setSpacing(0)
+        devices_layout.addWidget(self.device_rows)
+        self.device_rows.setVisible(False)
+        layout.addWidget(self.devices_card)
 
         self.qr_card = Card()
         qr_layout = QHBoxLayout(self.qr_card)
@@ -579,7 +635,8 @@ class MainWindow(QMainWindow):
             self.status_hint.setText("点击启动服务后，手机才能连接。")
 
         self.status_port.setText(f"端口 {self.config['port']}")
-        self.ip_value.setText(find_lan_ip())
+        self.last_lan_ip = find_lan_ip()
+        self.ip_value.setText(self.last_lan_ip)
         self.port_value.setText(str(self.config["port"]))
         self.data_value.setText(str(self.config["data_dir"]))
         self._refresh_qr()
@@ -611,9 +668,90 @@ class MainWindow(QMainWindow):
             QApplication.clipboard().setText(self.phone_url)
             self.status_hint.setText("手机地址已复制到剪贴板。")
 
+    def _refresh_network_info(self) -> None:
+        current_ip = find_lan_ip()
+        if current_ip != self.last_lan_ip:
+            self.last_lan_ip = current_ip
+            self.ip_value.setText(current_ip)
+            self._refresh_qr()
+
     def _open_phone_page(self) -> None:
         if self.phone_url:
             QDesktopServices.openUrl(QUrl(self.phone_url))
+
+    @staticmethod
+    def _format_ago(seconds: float) -> str:
+        if seconds < 5:
+            return "刚刚"
+        if seconds < 60:
+            return f"{int(seconds)} 秒前"
+        if seconds < 3600:
+            return f"{int(seconds // 60)} 分钟前"
+        if seconds < 86400:
+            return f"{int(seconds // 3600)} 小时前"
+        return f"{int(seconds // 86400)} 天前"
+
+    def _refresh_devices(self) -> None:
+        connections = self.controller.connections()
+        online = sum(1 for item in connections if item["online"])
+        self.devices_count.setText(f"{online} 台在线")
+        has_devices = bool(connections)
+        self.device_rows.setVisible(has_devices)
+        self.devices_empty.setVisible(not has_devices)
+
+        while self.device_rows_layout.count():
+            child = self.device_rows_layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+        if not has_devices:
+            return
+
+        colors = colors_for(self.dark)
+        for item in connections:
+            row = QFrame()
+            row.setObjectName("deviceRow")
+            row_layout = QVBoxLayout(row)
+            row_layout.setContentsMargins(0, 10, 0, 10)
+            row_layout.setSpacing(2)
+
+            online = bool(item["online"])
+            state_color = colors["success"] if online else colors["muted"]
+            device_label = QLabel(
+                f'<span style="font-weight:600;">{item["device"]}</span>'
+                f'&nbsp;&nbsp;<span style="color:{state_color}; font-weight:600;">'
+                f'● {"在线" if online else "离线"}</span>'
+            )
+            device_label.setTextFormat(Qt.TextFormat.RichText)
+            device_label.setObjectName("body")
+            action = str(item["last_action"] or "已连接")
+            detail_label = QLabel(
+                f'{item["ip"]} · {item["request_count"]} 次操作 · '
+                f'{self._format_ago(float(item["last_seen_ago"]))} · {action}'
+            )
+            detail_label.setObjectName("muted")
+            detail_label.setWordWrap(True)
+            row_layout.addWidget(device_label)
+            row_layout.addWidget(detail_label)
+            self.device_rows_layout.addWidget(row)
+
+    def _copy_diagnostics(self) -> None:
+        connections = self.controller.connections()
+        lines = [
+            f"PKB v{VERSION}",
+            f"服务状态：{'运行中' if self.controller.is_running else '已停止'}",
+            f"本机地址：{find_lan_ip()}",
+            f"监听端口：{self.config['port']}",
+            f"在线设备：{sum(1 for item in connections if item['online'])} 台",
+        ]
+        for item in connections:
+            state = "在线" if item["online"] else "离线"
+            lines.append(
+                f"- {item['device']} | {item['ip']} | {state} | "
+                f"{self._format_ago(float(item['last_seen_ago']))} | {item['last_action'] or '无操作'}"
+            )
+        QApplication.clipboard().setText("\n".join(lines))
+        self.status_hint.setText("诊断信息已复制，可以直接粘贴给其他人排查。")
 
     def _browse_data_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(

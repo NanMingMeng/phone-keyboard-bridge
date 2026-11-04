@@ -116,6 +116,18 @@ def build_qss(dark: bool) -> str:
             border: 1px solid $border;
             border-radius: 20px;
         }
+        QScrollArea#pageScroll {
+            background: transparent;
+            border: 0;
+        }
+        QScrollArea#pageScroll > QWidget > QWidget {
+            background: transparent;
+        }
+        QFrame#deviceRow {
+            background: transparent;
+            border: 0;
+            border-bottom: 1px solid $border;
+        }
         QPushButton#nav {
             text-align: left;
             padding: 10px 14px;

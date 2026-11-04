@@ -189,6 +189,20 @@ imageEl.addEventListener('change', () => {
 
 document.getElementById('sendImage').addEventListener('click', () => sendImage('paste'));
 document.getElementById('saveImage').addEventListener('click', () => sendImage('save'));
+
+async function heartbeat() {
+  try {
+    await fetch('/heartbeat', {
+      method: 'POST',
+      headers: { 'X-Token': TOKEN },
+      cache: 'no-store'
+    });
+  } catch (_) {
+    // The desktop UI marks the device offline when heartbeats stop.
+  }
+}
+heartbeat();
+setInterval(heartbeat, 5000);
 </script>
 </body>
 </html>
