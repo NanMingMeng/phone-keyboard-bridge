@@ -11,7 +11,8 @@ from typing import Any
 
 from .clipboard import copy_text, paste_image, paste_text
 from .config import Settings
-from .connections import ConnectionTracker
+from .connections import STATUS_APPROVED, DeviceRegistry
+from .records import RecordStore
 
 LOGGER = logging.getLogger("phone_keyboard.server")
 ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
@@ -24,7 +25,7 @@ def safe_image_stem(name: str) -> str:
     return stem or "image"
 
 
-def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
+def make_handler(settings: Settings, template: str, registry: DeviceRegistry, records: RecordStore):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"PhoneKeyboardBridge/{settings.version}"
 
@@ -46,12 +47,47 @@ def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
         def _client_ip(self) -> str:
             return str(self.client_address[0])
 
-        def _track(self, action: str | None = None) -> None:
-            tracker.touch(
+        def _device_id(self) -> str | None:
+            value = self.headers.get("X-Device-Id", "").strip()
+            if not value or len(value) > 128:
+                return None
+            return value
+
+        def _device_state(self, action: str | None = None, reset_denied: bool = False) -> str | None:
+            device_id = self._device_id()
+            if device_id is None:
+                return None
+            return registry.touch(
+                device_id,
                 self._client_ip(),
                 self.headers.get("User-Agent", ""),
-                action,
+                action=action,
+                reset_denied=reset_denied,
             )
+
+        def _session_payload(self, state: str) -> dict[str, Any]:
+            device_id = self._device_id() or ""
+            for item in registry.snapshot():
+                if item["device_id"] == device_id:
+                    return {
+                        "ok": True,
+                        "state": state,
+                        "device_id": device_id,
+                        "device": item["device"],
+                        "alias": item["alias"],
+                        "ip": item["ip"],
+                    }
+            return {"ok": True, "state": state, "device_id": device_id}
+
+        def _require_approved(self) -> bool:
+            state = self._device_state()
+            if state is None:
+                self._send_json(400, {"error": "Missing device ID", "state": "missing_device"})
+                return False
+            if state != STATUS_APPROVED:
+                self._send_json(403, {"error": "Device not approved", "state": state})
+                return False
+            return True
 
         def _read_body(self, limit: int) -> bytes:
             length = int(self.headers.get("Content-Length", "0"))
@@ -74,7 +110,6 @@ def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
                     self.end_headers()
                     self.wfile.write("Invalid link. Scan the QR code again.".encode("utf-8"))
                     return
-                self._track("打开手机页面")
                 body = (
                     template
                     .replace("__TOKEN__", json.dumps(settings.token))
@@ -98,27 +133,38 @@ def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
             self._send_json(404, {"error": "Not found"})
 
         def do_POST(self) -> None:
+            if self.path == "/session":
+                self._handle_session("申请连接", reset_denied=False)
+                return
+            if self.path == "/request-access":
+                self._handle_session("重新申请", reset_denied=True)
+                return
+            if self.path == "/heartbeat":
+                self._handle_session(None, reset_denied=False)
+                return
             if self.path == "/send":
                 self._handle_text()
                 return
             if self.path == "/send-image":
                 self._handle_image()
                 return
-            if self.path == "/heartbeat":
-                self._handle_heartbeat()
-                return
             self._send_json(404, {"error": "Not found"})
 
-        def _handle_heartbeat(self) -> None:
+        def _handle_session(self, action: str | None, reset_denied: bool) -> None:
             if not self._authorized():
-                self._send_json(403, {"error": "Invalid link"})
+                self._send_json(403, {"error": "Invalid link", "state": "invalid_link"})
                 return
-            self._track()
-            self._send_json(200, {"ok": True})
+            if self._device_id() is None:
+                self._send_json(400, {"error": "Missing device ID", "state": "missing_device"})
+                return
+            state = self._device_state(action=action, reset_denied=reset_denied)
+            self._send_json(200, self._session_payload(str(state)))
 
         def _handle_text(self) -> None:
             if not self._authorized():
-                self._send_json(403, {"error": "Invalid link"})
+                self._send_json(403, {"error": "Invalid link", "state": "invalid_link"})
+                return
+            if not self._require_approved():
                 return
             try:
                 payload = json.loads(self._read_body(MAX_TEXT_BYTES).decode("utf-8"))
@@ -129,15 +175,25 @@ def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
                     self._send_json(400, {"error": "Text is empty"})
                     return
                 if mode == "copy":
-                    copy_text(text)
-                    self._track("复制文字")
+                    try:
+                        copy_text(text)
+                    except Exception as error:
+                        records.add_text(text, "复制文字", False, str(error))
+                        raise
+                    self._device_state("复制文字")
+                    records.add_text(text, "复制文字", True)
                     self._send_json(200, {"ok": True, "copied": True})
                     return
                 if mode != "paste":
                     self._send_json(400, {"error": "Invalid mode"})
                     return
-                paste_text(text, press_enter=press_enter)
-                self._track("粘贴文字")
+                try:
+                    paste_text(text, press_enter=press_enter)
+                except Exception as error:
+                    records.add_text(text, "粘贴文字", False, str(error))
+                    raise
+                self._device_state("粘贴文字")
+                records.add_text(text, "粘贴文字", True)
                 self._send_json(200, {"ok": True, "pasted": True})
             except RuntimeError as error:
                 self._send_json(501, {"error": str(error)})
@@ -147,7 +203,9 @@ def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
 
         def _handle_image(self) -> None:
             if not self._authorized():
-                self._send_json(403, {"error": "Invalid link"})
+                self._send_json(403, {"error": "Invalid link", "state": "invalid_link"})
+                return
+            if not self._require_approved():
                 return
             try:
                 raw_name = urllib.parse.unquote(self.headers.get("X-Filename", "image"))
@@ -166,14 +224,15 @@ def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
                 path.write_bytes(data)
 
                 if mode == "save":
-                    self._track("保存图片")
+                    self._device_state("保存图片")
+                    records.add_image(path, "保存图片", True)
                     self._send_json(200, {"ok": True, "saved": True, "pasted": False, "path": str(path)})
                     return
                 try:
                     paste_image(path)
-                    self._track("粘贴图片")
-                    self._send_json(200, {"ok": True, "saved": True, "pasted": True, "path": str(path)})
                 except RuntimeError as error:
+                    self._device_state("粘贴图片")
+                    records.add_image(path, "粘贴图片", False, str(error))
                     self._send_json(
                         200,
                         {
@@ -184,6 +243,10 @@ def make_handler(settings: Settings, template: str, tracker: ConnectionTracker):
                             "warning": str(error),
                         },
                     )
+                    return
+                self._device_state("粘贴图片")
+                records.add_image(path, "粘贴图片", True)
+                self._send_json(200, {"ok": True, "saved": True, "pasted": True, "path": str(path)})
             except ValueError as error:
                 self._send_json(400, {"error": str(error)})
             except Exception as error:
@@ -201,16 +264,19 @@ class _Server(ThreadingHTTPServer):
 def create_server(
     settings: Settings,
     template: str,
-    tracker: ConnectionTracker | None = None,
+    registry: DeviceRegistry,
+    records: RecordStore,
 ) -> ThreadingHTTPServer:
-    tracker = tracker or ConnectionTracker()
-    handler = make_handler(settings, template, tracker)
+    handler = make_handler(settings, template, registry, records)
     server = _Server((settings.host, settings.port), handler)
-    server.tracker = tracker
+    server.registry = registry
+    server.records = records
     return server
 
 
 def run_server(settings: Settings, template: str) -> None:
-    server = create_server(settings, template)
+    registry = DeviceRegistry(settings.data_dir / "approved_devices.json")
+    records = RecordStore(settings.data_dir / "records.json")
+    server = create_server(settings, template, registry, records)
     LOGGER.info("Listening on %s:%s", settings.host, settings.port)
     server.serve_forever()

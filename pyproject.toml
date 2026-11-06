@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phone-keyboard-bridge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Type on your phone and paste into the active window on your Windows PC over LAN."
 readme = "README.md"
 requires-python = ">=3.10"

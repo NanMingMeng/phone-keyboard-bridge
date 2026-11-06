@@ -13,6 +13,7 @@ def main() -> int:
     app.setApplicationName("PKB")
     app.setApplicationDisplayName("PKB")
     app.setOrganizationName("NanMingMeng")
+    app.setQuitOnLastWindowClosed(False)
 
     icon_path = resource_path("assets/icon.png")
     if icon_path.exists():

@@ -1,34 +1,41 @@
 from __future__ import annotations
 
+import datetime
 import io
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
 import qrcode
 from PyQt6.QtCore import QSize, Qt, QTimer, QUrl
-from PyQt6.QtGui import QDesktopServices, QIcon, QPixmap
+from PyQt6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
     QStackedWidget,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
 
+from phone_keyboard.clipboard import copy_image_to_clipboard, copy_text
 from phone_keyboard.cli import build_url, find_lan_ip
 from phone_keyboard.config import (
     VERSION,
@@ -38,6 +45,8 @@ from phone_keyboard.config import (
     package_dir,
 )
 
+from .device_dialog import DeviceApprovalDialog
+from .diagnostics import run_checks
 from .icons import svg_icon, svg_pixmap
 from .server_controller import ServerController
 from .settings_store import load_config, save_config, set_startup
@@ -70,10 +79,21 @@ class MainWindow(QMainWindow):
         self.last_lan_ip = ""
         self.start_error: str | None = None
         self.last_log_size = -1
+        self._really_quit = False
+        self._pending_dialog_open = False
+        self._shown_pending: set[str] = set()
+        self._records_signature: tuple[str, ...] | None = None
+        self.tray: QSystemTrayIcon | None = None
 
         self._build_ui()
         self._apply_theme()
         self._start_server()
+        self._setup_tray()
+        try:
+            if self.config.get("startup", True):
+                set_startup(True)
+        except Exception:
+            logging.getLogger("pkb.ui").exception("Failed to ensure startup entry")
 
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self._refresh_logs)
@@ -86,6 +106,14 @@ class MainWindow(QMainWindow):
         self.network_timer = QTimer(self)
         self.network_timer.timeout.connect(self._refresh_network_info)
         self.network_timer.start(3000)
+
+        self.pending_timer = QTimer(self)
+        self.pending_timer.timeout.connect(self._check_pending_requests)
+        self.pending_timer.start(1000)
+
+        self.record_timer = QTimer(self)
+        self.record_timer.timeout.connect(self._refresh_records)
+        self.record_timer.start(2000)
 
         self.theme_timer = QTimer(self)
         self.theme_timer.timeout.connect(self._check_theme)
@@ -109,6 +137,7 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_connection_page())
+        self.stack.addWidget(self._build_records_page())
         self.stack.addWidget(self._build_settings_page())
         self.stack.addWidget(self._build_logs_page())
         self.stack.addWidget(self._build_about_page())
@@ -158,6 +187,7 @@ class MainWindow(QMainWindow):
         self.nav_buttons: list[NavButton] = []
         nav_items = [
             ("link", "连接"),
+            ("history", "记录"),
             ("settings", "设置"),
             ("logs", "日志"),
             ("about", "关于"),
@@ -224,6 +254,29 @@ class MainWindow(QMainWindow):
         self.status_hint.setObjectName("statusHint")
         self.status_hint.setWordWrap(True)
         status_layout.addWidget(self.status_hint)
+
+        check_row = QHBoxLayout()
+        check_row.setSpacing(10)
+        self.self_check_btn = QPushButton("检查连接")
+        self.self_check_btn.setObjectName("secondary")
+        self.self_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.self_check_btn.setIcon(svg_icon("check", "#6B7280", 16))
+        self.self_check_btn.clicked.connect(self._run_self_check)
+        self.open_firewall_btn = QPushButton("打开防火墙设置")
+        self.open_firewall_btn.setObjectName("secondary")
+        self.open_firewall_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.open_firewall_btn.clicked.connect(self._open_firewall_settings)
+        self.open_firewall_btn.setVisible(False)
+        check_row.addWidget(self.self_check_btn)
+        check_row.addWidget(self.open_firewall_btn)
+        check_row.addStretch(1)
+        status_layout.addLayout(check_row)
+
+        self.self_check_result = QLabel("")
+        self.self_check_result.setObjectName("muted")
+        self.self_check_result.setWordWrap(True)
+        self.self_check_result.setVisible(False)
+        status_layout.addWidget(self.self_check_result)
         layout.addWidget(self.status_card)
 
         self.devices_card = Card()
@@ -329,11 +382,69 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
         return page
 
-    def _build_settings_page(self) -> QWidget:
+    def _build_records_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
+
+        layout.addWidget(PageHeader("记录", "查看最近发送的文字和图片。最多保留 50 条。"))
+
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(10)
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.setObjectName("secondary")
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh_btn.setIcon(svg_icon("refresh", "#6B7280", 16))
+        refresh_btn.clicked.connect(lambda: self._refresh_records(force=True))
+        clear_btn = QPushButton("清空全部记录")
+        clear_btn.setObjectName("danger")
+        clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        clear_btn.setIcon(svg_icon("trash", "#DC2626", 16))
+        clear_btn.clicked.connect(self._clear_records)
+        self.records_summary = QLabel("0 条记录")
+        self.records_summary.setObjectName("muted")
+        toolbar.addWidget(refresh_btn)
+        toolbar.addWidget(clear_btn)
+        toolbar.addWidget(self.records_summary)
+        toolbar.addStretch(1)
+        layout.addLayout(toolbar)
+
+        self.records_empty = QLabel("还没有发送记录。手机发送文字或图片后会出现在这里。")
+        self.records_empty.setObjectName("muted")
+        self.records_empty.setWordWrap(True)
+        layout.addWidget(self.records_empty)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.records_content = QWidget()
+        self.records_layout = QVBoxLayout(self.records_content)
+        self.records_layout.setContentsMargins(0, 0, 8, 0)
+        self.records_layout.setSpacing(10)
+        scroll.setWidget(self.records_content)
+        self.records_scroll = scroll
+        layout.addWidget(scroll, 1)
+        return page
+
+    def _build_settings_page(self) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("pageScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(16)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
 
         layout.addWidget(PageHeader("设置", "修改端口、数据目录和启动行为。保存后会自动重启服务。"))
 
@@ -393,6 +504,27 @@ class MainWindow(QMainWindow):
         token_hint.setWordWrap(True)
         security_layout.addWidget(token_hint)
         layout.addWidget(security_card)
+
+        devices_card = Card()
+        devices_layout = QVBoxLayout(devices_card)
+        devices_layout.setContentsMargins(22, 20, 22, 20)
+        devices_layout.setSpacing(10)
+        devices_title = QLabel("已授权设备")
+        devices_title.setObjectName("h2")
+        devices_layout.addWidget(devices_title)
+        devices_hint = QLabel("这里可以给长期使用的手机改名，或者撤销授权。")
+        devices_hint.setObjectName("muted")
+        devices_hint.setWordWrap(True)
+        devices_layout.addWidget(devices_hint)
+        self.approved_empty = QLabel("还没有已授权设备。手机首次连接并允许后会出现在这里。")
+        self.approved_empty.setObjectName("muted")
+        self.approved_empty.setWordWrap(True)
+        devices_layout.addWidget(self.approved_empty)
+        self.approved_rows_layout = QVBoxLayout()
+        self.approved_rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.approved_rows_layout.setSpacing(0)
+        devices_layout.addLayout(self.approved_rows_layout)
+        layout.addWidget(devices_card)
 
         startup_card = Card()
         startup_layout = QVBoxLayout(startup_card)
@@ -541,7 +673,11 @@ class MainWindow(QMainWindow):
     def _select_page(self, index: int) -> None:
         self.stack.setCurrentIndex(index)
         self._refresh_nav_icons()
-        if index == 2:
+        if index == 1:
+            self._refresh_records(force=True)
+        elif index == 2:
+            self._refresh_approved_devices()
+        elif index == 3:
             self._refresh_logs(force=True)
 
     def _refresh_nav_icons(self) -> None:
@@ -611,9 +747,11 @@ class MainWindow(QMainWindow):
             self.controller.stop()
             logging.getLogger("pkb.ui").info("Service stopped by user")
             self._update_connection_ui()
+            self._refresh_tray_menu()
             self.settings_status.setText("服务已停止。")
         else:
             self._start_server()
+            self._refresh_tray_menu()
 
     def _update_connection_ui(self) -> None:
         colors = colors_for(self.dark)
@@ -640,6 +778,7 @@ class MainWindow(QMainWindow):
         self.port_value.setText(str(self.config["port"]))
         self.data_value.setText(str(self.config["data_dir"]))
         self._refresh_qr()
+        self._refresh_tray_menu()
 
     def _refresh_qr(self) -> None:
         if not self.token:
@@ -694,7 +833,11 @@ class MainWindow(QMainWindow):
     def _refresh_devices(self) -> None:
         connections = self.controller.connections()
         online = sum(1 for item in connections if item["online"])
-        self.devices_count.setText(f"{online} 台在线")
+        pending = sum(1 for item in connections if item["status"] == "pending")
+        count_text = f"{online} 台在线"
+        if pending:
+            count_text += f" · {pending} 台待确认"
+        self.devices_count.setText(count_text)
         has_devices = bool(connections)
         self.device_rows.setVisible(has_devices)
         self.devices_empty.setVisible(not has_devices)
@@ -705,6 +848,7 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
         if not has_devices:
+            self._refresh_tray_menu()
             return
 
         colors = colors_for(self.dark)
@@ -716,17 +860,27 @@ class MainWindow(QMainWindow):
             row_layout.setSpacing(2)
 
             online = bool(item["online"])
-            state_color = colors["success"] if online else colors["muted"]
+            status = str(item["status"])
+            if status == "approved":
+                state_text = "在线" if online else "离线"
+                state_color = colors["success"] if online else colors["muted"]
+            elif status == "pending":
+                state_text = "等待确认"
+                state_color = colors["primary"]
+            else:
+                state_text = "已拒绝"
+                state_color = colors["danger"]
+            display_name = str(item["alias"] or item["device"])
             device_label = QLabel(
-                f'<span style="font-weight:600;">{item["device"]}</span>'
+                f'<span style="font-weight:600;">{display_name}</span>'
                 f'&nbsp;&nbsp;<span style="color:{state_color}; font-weight:600;">'
-                f'● {"在线" if online else "离线"}</span>'
+                f'● {state_text}</span>'
             )
             device_label.setTextFormat(Qt.TextFormat.RichText)
             device_label.setObjectName("body")
             action = str(item["last_action"] or "已连接")
             detail_label = QLabel(
-                f'{item["ip"]} · {item["request_count"]} 次操作 · '
+                f'{item["device"]} · {item["ip"]} · {item["request_count"]} 次操作 · '
                 f'{self._format_ago(float(item["last_seen_ago"]))} · {action}'
             )
             detail_label.setObjectName("muted")
@@ -734,6 +888,7 @@ class MainWindow(QMainWindow):
             row_layout.addWidget(device_label)
             row_layout.addWidget(detail_label)
             self.device_rows_layout.addWidget(row)
+        self._refresh_tray_menu()
 
     def _copy_diagnostics(self) -> None:
         connections = self.controller.connections()
@@ -753,6 +908,321 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setText("\n".join(lines))
         self.status_hint.setText("诊断信息已复制，可以直接粘贴给其他人排查。")
 
+    @staticmethod
+    def _clear_layout(layout: QVBoxLayout) -> None:
+        while layout.count():
+            child = layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _refresh_approved_devices(self) -> None:
+        if not hasattr(self, "approved_rows_layout"):
+            return
+        self._clear_layout(self.approved_rows_layout)
+        devices = self.controller.approved_devices()
+        self.approved_empty.setVisible(not devices)
+        for item in devices:
+            row = QFrame()
+            row.setObjectName("deviceRow")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 8, 0, 8)
+            row_layout.setSpacing(10)
+            text_col = QVBoxLayout()
+            text_col.setSpacing(2)
+            alias = str(item["alias"] or item["device"])
+            alias_label = QLabel(alias)
+            alias_label.setObjectName("body")
+            last_seen = float(item.get("last_seen_ago", 0.0))
+            detail = (
+                f"{item['device']} · {item['ip'] or '尚无 IP'} · "
+                f"{'从未连接' if last_seen <= 0 else self._format_ago(last_seen)}"
+            )
+            detail_label = QLabel(detail)
+            detail_label.setObjectName("muted")
+            text_col.addWidget(alias_label)
+            text_col.addWidget(detail_label)
+            rename_btn = QPushButton("改名")
+            rename_btn.setObjectName("secondary")
+            rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            rename_btn.clicked.connect(
+                lambda _checked=False, device_id=str(item["device_id"]), old=alias: self._rename_approved_device(device_id, old)
+            )
+            revoke_btn = QPushButton("撤销授权")
+            revoke_btn.setObjectName("danger")
+            revoke_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            revoke_btn.clicked.connect(
+                lambda _checked=False, device_id=str(item["device_id"]), name=alias: self._revoke_approved_device(device_id, name)
+            )
+            row_layout.addLayout(text_col, 1)
+            row_layout.addWidget(rename_btn)
+            row_layout.addWidget(revoke_btn)
+            self.approved_rows_layout.addWidget(row)
+
+    def _rename_approved_device(self, device_id: str, old_alias: str) -> None:
+        alias, ok = QInputDialog.getText(self, "修改设备名称", "设备名称：", text=old_alias)
+        if ok and alias.strip():
+            self.controller.rename_device(device_id, alias.strip())
+            self._refresh_approved_devices()
+            self._refresh_devices()
+
+    def _revoke_approved_device(self, device_id: str, alias: str) -> None:
+        result = QMessageBox.question(
+            self,
+            "撤销设备授权",
+            f"撤销“{alias}”的授权后，这台设备下次连接需要重新申请。继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+        self.controller.revoke_device(device_id)
+        self._refresh_approved_devices()
+        self._refresh_devices()
+
+    def _check_pending_requests(self) -> None:
+        if not self.controller.is_running or self._pending_dialog_open:
+            return
+        pending = self.controller.pending_requests()
+        if not pending:
+            return
+        for request in pending:
+            device_id = str(request["device_id"])
+            if device_id in self._shown_pending:
+                continue
+            self._shown_pending.add(device_id)
+            self._pending_dialog_open = True
+            try:
+                dialog = DeviceApprovalDialog(request, self)
+                accepted = dialog.exec() == QDialog.DialogCode.Accepted
+                if accepted:
+                    self.controller.approve_device(device_id, dialog.alias)
+                    if self.tray is not None:
+                        self.tray.showMessage("PKB", f"已允许 {dialog.alias} 连接", QSystemTrayIcon.MessageIcon.Information, 2500)
+                else:
+                    self.controller.deny_device(device_id)
+            finally:
+                self._pending_dialog_open = False
+                self._shown_pending.discard(device_id)
+                self._refresh_devices()
+                self._refresh_approved_devices()
+            break
+
+    def _refresh_records(self, force: bool = False) -> None:
+        if not hasattr(self, "records_layout"):
+            return
+        if not force and self.stack.currentIndex() != 1:
+            return
+        records = self.controller.records()
+        signature = tuple(str(item.get("id", "")) for item in records)
+        if not force and signature == self._records_signature:
+            return
+        self._records_signature = signature
+        self._clear_layout(self.records_layout)
+        self.records_summary.setText(f"{len(records)} 条记录")
+        self.records_empty.setVisible(not records)
+        self.records_scroll.setVisible(bool(records))
+        for item in records:
+            row = QFrame()
+            row.setObjectName("recordRow")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(14, 12, 14, 12)
+            row_layout.setSpacing(12)
+
+            if item.get("type") == "image":
+                thumb = QLabel()
+                thumb.setFixedSize(92, 64)
+                thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                image_path = Path(str(item.get("image_path", "")))
+                if image_path.exists():
+                    pixmap = QPixmap(str(image_path)).scaled(
+                        92,
+                        64,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                    thumb.setPixmap(pixmap)
+                else:
+                    thumb.setText("文件已删除")
+                    thumb.setObjectName("muted")
+                row_layout.addWidget(thumb)
+                title_text = "图片"
+                preview_text = str(item.get("action", "图片"))
+            else:
+                title_text = "文字"
+                text = str(item.get("text", "")).replace("\n", " ")
+                preview_text = text[:120] + ("…" if len(text) > 120 else "")
+                preview_label = QLabel(preview_text)
+                preview_label.setObjectName("body")
+                preview_label.setWordWrap(True)
+                row_layout.addWidget(preview_label, 1)
+
+            if item.get("type") == "image":
+                info_col = QVBoxLayout()
+                info_col.setSpacing(2)
+                title_label = QLabel(title_text)
+                title_label.setObjectName("body")
+                preview_label = QLabel(preview_text)
+                preview_label.setObjectName("muted")
+                info_col.addWidget(title_label)
+                info_col.addWidget(preview_label)
+                row_layout.addLayout(info_col, 1)
+
+            meta_col = QVBoxLayout()
+            meta_col.setSpacing(2)
+            created = str(item.get("created_at", ""))
+            try:
+                created_text = datetime.datetime.fromisoformat(created).strftime("%m-%d %H:%M")
+            except ValueError:
+                created_text = created
+            result_text = "成功" if item.get("success") else "失败"
+            if item.get("error"):
+                result_text += f"：{item.get('error')}"
+            meta_label = QLabel(f"{created_text} · {result_text}")
+            meta_label.setObjectName("muted")
+            meta_label.setWordWrap(True)
+            meta_col.addWidget(meta_label)
+            row_layout.addLayout(meta_col, 0)
+
+            copy_btn = QPushButton("复制")
+            copy_btn.setObjectName("secondary")
+            copy_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            copy_btn.clicked.connect(lambda _checked=False, record_id=str(item.get("id", "")): self._copy_record(record_id))
+            delete_btn = QPushButton("删除")
+            delete_btn.setObjectName("danger")
+            delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            delete_btn.clicked.connect(lambda _checked=False, record_id=str(item.get("id", "")): self._delete_record(record_id))
+            row_layout.addWidget(copy_btn)
+            row_layout.addWidget(delete_btn)
+            self.records_layout.addWidget(row)
+        self.records_layout.addStretch(1)
+
+    def _copy_record(self, record_id: str) -> None:
+        for item in self.controller.records():
+            if str(item.get("id")) != record_id:
+                continue
+            try:
+                if item.get("type") == "image":
+                    copy_image_to_clipboard(Path(str(item.get("image_path", ""))))
+                    self.records_summary.setText("图片已复制到剪贴板")
+                else:
+                    copy_text(str(item.get("text", "")))
+                    self.records_summary.setText("文字已复制到剪贴板")
+            except Exception as error:
+                QMessageBox.warning(self, "复制失败", str(error))
+            return
+
+    def _delete_record(self, record_id: str) -> None:
+        result = QMessageBox.question(
+            self,
+            "删除记录",
+            "删除这条记录后，对应图片文件也会一起删除。继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+        self.controller.delete_record(record_id)
+        self._records_signature = None
+        self._refresh_records(force=True)
+
+    def _clear_records(self) -> None:
+        result = QMessageBox.question(
+            self,
+            "清空全部记录",
+            "确定要清空全部发送记录吗？对应图片文件也会一起删除。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+        result = QMessageBox.question(
+            self,
+            "再次确认",
+            "这是不可恢复操作。再次确认清空全部记录和图片文件？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+        self.controller.clear_records()
+        self._records_signature = None
+        self._refresh_records(force=True)
+
+    def _run_self_check(self) -> None:
+        self.self_check_btn.setEnabled(False)
+        self.self_check_result.setText("正在检查……")
+        self.self_check_result.setVisible(True)
+        QApplication.processEvents()
+        try:
+            results = run_checks(
+                int(self.config["port"]),
+                self.token,
+                self.controller.is_running,
+            )
+            lines = []
+            for result in results:
+                state = "通过" if result.ok else "需要处理"
+                line = f"{state} · {result.name}：{result.detail}"
+                if not result.ok and result.hint:
+                    line += f"\n  建议：{result.hint}"
+                lines.append(line)
+            self.self_check_result.setText("\n".join(lines))
+            self.open_firewall_btn.setVisible(any(not item.ok for item in results))
+        except Exception as error:
+            self.self_check_result.setText(f"自检失败：{error}")
+        finally:
+            self.self_check_btn.setEnabled(True)
+
+    def _open_firewall_settings(self) -> None:
+        subprocess.Popen(
+            ["control.exe", "/name", "Microsoft.WindowsDefenderFirewall"],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    def _setup_tray(self) -> None:
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        icon_path = resource_path("assets/icon.png")
+        self.tray = QSystemTrayIcon(QIcon(str(icon_path)), self)
+        menu = QMenu()
+        show_action = QAction("显示主窗口", self)
+        show_action.triggered.connect(self._show_window)
+        copy_action = QAction("复制手机地址", self)
+        copy_action.triggered.connect(self._copy_phone_url)
+        self.tray_toggle_action = QAction("停止服务", self)
+        self.tray_toggle_action.triggered.connect(self._toggle_server)
+        quit_action = QAction("退出 PKB", self)
+        quit_action.triggered.connect(self._quit_app)
+        menu.addAction(show_action)
+        menu.addAction(copy_action)
+        menu.addSeparator()
+        menu.addAction(self.tray_toggle_action)
+        menu.addSeparator()
+        menu.addAction(quit_action)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self._tray_activated)
+        self.tray.show()
+        self._refresh_tray_menu()
+
+    def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._show_window()
+
+    def _refresh_tray_menu(self) -> None:
+        if self.tray is None or not hasattr(self, "tray_toggle_action"):
+            return
+        self.tray_toggle_action.setText("停止服务" if self.controller.is_running else "启动服务")
+        self.tray.setToolTip(f"PKB · {self.controller.online_count} 台在线")
+
+    def _show_window(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_app(self) -> None:
+        self._really_quit = True
+        if self.tray is not None:
+            self.tray.hide()
+        self.close()
+        QApplication.quit()
+
     def _browse_data_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self, "选择数据目录", self.data_dir_edit.text()
@@ -770,13 +1240,16 @@ class MainWindow(QMainWindow):
         if result != QMessageBox.StandardButton.Yes:
             return
         data_dir = Path(self.config["data_dir"])
+        self.controller.clear_devices()
+        self._shown_pending.clear()
         try:
             (data_dir / "token.txt").unlink()
         except FileNotFoundError:
             pass
         self.controller.stop()
         self._start_server()
-        self.settings_status.setText("连接令牌已重置，请让手机重新扫码。")
+        self._refresh_approved_devices()
+        self.settings_status.setText("连接令牌和授权设备已重置，请让手机重新扫码。")
 
     def _save_settings(self) -> None:
         port = int(self.port_spin.value())
@@ -848,5 +1321,23 @@ class MainWindow(QMainWindow):
             self._apply_theme()
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self.tray is not None and not self._really_quit:
+            event.ignore()
+            self.hide()
+            if not self.config.get("tray_hint_shown", False):
+                self.tray.showMessage(
+                    "PKB 仍在后台运行",
+                    "关闭窗口不会停止服务。要完全退出，请右键托盘图标选择“退出 PKB”。",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    4000,
+                )
+                self.config["tray_hint_shown"] = True
+                try:
+                    save_config(self.config)
+                except Exception:
+                    logging.getLogger("pkb.ui").exception("Failed to save tray hint state")
+            return
         self.controller.stop()
+        if self.tray is not None:
+            self.tray.hide()
         event.accept()

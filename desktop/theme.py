@@ -128,6 +128,15 @@ def build_qss(dark: bool) -> str:
             border: 0;
             border-bottom: 1px solid $border;
         }
+        QFrame#recordRow {
+            background: $card;
+            border: 1px solid $border;
+            border-radius: 16px;
+        }
+        QDialog {
+            background: $card;
+            color: $text;
+        }
         QPushButton#nav {
             text-align: left;
             padding: 10px 14px;

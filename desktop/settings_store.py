@@ -28,7 +28,9 @@ def default_config() -> dict[str, Any]:
     return {
         "port": DEFAULT_PORT,
         "data_dir": str(default_data_dir()),
-        "startup": False,
+        "startup": True,
+        "settings_version": 2,
+        "tray_hint_shown": False,
     }
 
 
@@ -39,7 +41,12 @@ def load_config() -> dict[str, Any]:
         try:
             stored = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(stored, dict):
-                config.update(stored)
+                migrated = dict(stored)
+                if "settings_version" not in migrated:
+                    migrated["startup"] = True
+                    migrated["settings_version"] = 2
+                    migrated.setdefault("tray_hint_shown", False)
+                config.update(migrated)
         except (OSError, json.JSONDecodeError):
             pass
     return config
