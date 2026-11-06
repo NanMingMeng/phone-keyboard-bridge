@@ -31,6 +31,8 @@ def default_config() -> dict[str, Any]:
         "startup": True,
         "settings_version": 2,
         "tray_hint_shown": False,
+        "auto_update_check": True,
+        "last_update_check": 0.0,
     }
 
 
@@ -46,6 +48,8 @@ def load_config() -> dict[str, Any]:
                     migrated["startup"] = True
                     migrated["settings_version"] = 2
                     migrated.setdefault("tray_hint_shown", False)
+                    migrated.setdefault("auto_update_check", True)
+                    migrated.setdefault("last_update_check", 0.0)
                 config.update(migrated)
         except (OSError, json.JSONDecodeError):
             pass

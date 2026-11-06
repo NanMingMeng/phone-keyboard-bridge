@@ -5,11 +5,13 @@ import io
 import logging
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 import qrcode
 from PyQt6.QtCore import QSize, Qt, QTimer, QUrl
-from PyQt6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
+from PyQt6.QtGui import QAction, QDesktopServices, QIcon, QIntValidator, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -28,7 +30,6 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QStackedWidget,
     QSystemTrayIcon,
     QVBoxLayout,
@@ -51,6 +52,7 @@ from .icons import svg_icon, svg_pixmap
 from .server_controller import ServerController
 from .settings_store import load_config, save_config, set_startup
 from .theme import build_qss, colors_for, is_dark_mode
+from .updater import UpdateCheckWorker, UpdateDownloadWorker, UpdateInfo, launch_update_installer
 from .widgets import Card, NavButton, PageHeader, StatusDot, ToggleSwitch
 
 
@@ -84,6 +86,8 @@ class MainWindow(QMainWindow):
         self._shown_pending: set[str] = set()
         self._records_signature: tuple[str, ...] | None = None
         self.tray: QSystemTrayIcon | None = None
+        self._update_check_worker: UpdateCheckWorker | None = None
+        self._update_download_worker: UpdateDownloadWorker | None = None
 
         self._build_ui()
         self._apply_theme()
@@ -118,6 +122,8 @@ class MainWindow(QMainWindow):
         self.theme_timer = QTimer(self)
         self.theme_timer.timeout.connect(self._check_theme)
         self.theme_timer.start(2000)
+
+        QTimer.singleShot(3000, self._auto_check_update)
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -455,11 +461,11 @@ class MainWindow(QMainWindow):
         service_layout.setVerticalSpacing(14)
         service_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
 
-        self.port_spin = QSpinBox()
-        self.port_spin.setRange(1024, 65535)
-        self.port_spin.setValue(int(self.config["port"]))
-        self.port_spin.setFixedWidth(160)
-        service_layout.addRow("监听端口", self.port_spin)
+        self.port_edit = QLineEdit(str(self.config["port"]))
+        self.port_edit.setValidator(QIntValidator(1024, 65535, self))
+        self.port_edit.setFixedWidth(160)
+        self.port_edit.setPlaceholderText("1024–65535")
+        service_layout.addRow("监听端口", self.port_edit)
 
         dir_row = QWidget()
         dir_layout = QHBoxLayout(dir_row)
@@ -548,6 +554,34 @@ class MainWindow(QMainWindow):
         startup_layout.addLayout(startup_row)
         startup_layout.addWidget(startup_hint)
         layout.addWidget(startup_card)
+
+        update_card = Card()
+        update_layout = QVBoxLayout(update_card)
+        update_layout.setContentsMargins(22, 20, 22, 20)
+        update_layout.setSpacing(10)
+        update_title = QLabel("软件更新")
+        update_title.setObjectName("h2")
+        update_layout.addWidget(update_title)
+        self.update_status = QLabel(f"当前版本 v{VERSION}")
+        self.update_status.setObjectName("muted")
+        self.update_status.setWordWrap(True)
+        update_layout.addWidget(self.update_status)
+        update_row = QHBoxLayout()
+        update_row.setSpacing(10)
+        self.update_switch = ToggleSwitch()
+        self.update_switch.setChecked(bool(self.config.get("auto_update_check", True)))
+        auto_update_label = QLabel("启动时自动检查更新")
+        auto_update_label.setObjectName("body")
+        self.check_update_btn = QPushButton("立即检查更新")
+        self.check_update_btn.setObjectName("secondary")
+        self.check_update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.check_update_btn.clicked.connect(lambda: self._check_for_updates(silent=False))
+        update_row.addWidget(auto_update_label)
+        update_row.addWidget(self.update_switch)
+        update_row.addStretch(1)
+        update_row.addWidget(self.check_update_btn)
+        update_layout.addLayout(update_row)
+        layout.addWidget(update_card)
 
         save_row = QHBoxLayout()
         self.save_btn = QPushButton("保存并重启服务")
@@ -695,6 +729,8 @@ class MainWindow(QMainWindow):
         self._refresh_nav_icons()
         if hasattr(self, "startup_switch"):
             self.startup_switch.set_dark(self.dark)
+        if hasattr(self, "update_switch"):
+            self.update_switch.set_dark(self.dark)
         if hasattr(self, "status_dot"):
             self.status_dot.set_color(colors["success"] if self.controller.is_running else colors["muted"])
         if hasattr(self, "github_link"):
@@ -1223,6 +1259,116 @@ class MainWindow(QMainWindow):
         self.close()
         QApplication.quit()
 
+    def _auto_check_update(self) -> None:
+        if not self.config.get("auto_update_check", True):
+            return
+        try:
+            last_check = float(self.config.get("last_update_check", 0.0))
+        except (TypeError, ValueError):
+            last_check = 0.0
+        if time.time() - last_check < 86400:
+            return
+        self._check_for_updates(silent=True)
+
+    def _check_for_updates(self, silent: bool = False) -> None:
+        if self._update_check_worker is not None and self._update_check_worker.isRunning():
+            return
+        self.check_update_btn.setEnabled(False)
+        if not silent:
+            self.update_status.setText("正在检查 GitHub 上的最新版本…")
+        worker = UpdateCheckWorker(VERSION, self)
+        self._update_check_worker = worker
+        worker.result_ready.connect(lambda info, error: self._handle_update_check_result(info, error, silent))
+        worker.start()
+
+    def _handle_update_check_result(self, info: object, error: object, silent: bool) -> None:
+        self._update_check_worker = None
+        self.check_update_btn.setEnabled(True)
+        self.config["last_update_check"] = time.time()
+        try:
+            save_config(self.config)
+        except Exception:
+            pass
+        if error is not None:
+            message = f"检查更新失败：{error}"
+            self.update_status.setText(message)
+            if not silent:
+                QMessageBox.warning(self, "检查更新", message)
+            return
+        if info is None:
+            self.update_status.setText(f"当前已是最新版本 v{VERSION}")
+            if not silent:
+                QMessageBox.information(self, "检查更新", "当前已经是最新版本。")
+            return
+        update = info
+        if not isinstance(update, UpdateInfo):
+            return
+        self.update_status.setText(f"发现新版本 v{update.version}，当前版本 v{VERSION}")
+        notes = update.notes.strip()
+        if len(notes) > 500:
+            notes = notes[:500] + "…"
+        detail = f"发现新版本 v{update.version}。\n\n{notes}\n\n是否下载并安装？"
+        result = QMessageBox.question(
+            self,
+            "发现新版本",
+            detail,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result == QMessageBox.StandardButton.Yes:
+            self._start_update_download(update)
+
+    def _start_update_download(self, update: UpdateInfo) -> None:
+        if self._update_download_worker is not None and self._update_download_worker.isRunning():
+            return
+        self.check_update_btn.setEnabled(False)
+        self.update_status.setText(f"正在下载 v{update.version}…")
+        worker = UpdateDownloadWorker(update, Path(tempfile.gettempdir()) / "PKB-update", self)
+        self._update_download_worker = worker
+        worker.progress_changed.connect(self._update_download_progress)
+        worker.result_ready.connect(lambda path, error: self._handle_update_download_result(update, path, error))
+        worker.start()
+
+    def _update_download_progress(self, downloaded: int, total: int) -> None:
+        if total > 0:
+            percent = min(100, int(downloaded * 100 / total))
+            self.update_status.setText(f"正在下载更新：{percent}%")
+        else:
+            self.update_status.setText(f"正在下载更新：{downloaded // (1024 * 1024)} MB")
+
+    def _handle_update_download_result(self, update: UpdateInfo, path: object, error: object) -> None:
+        self._update_download_worker = None
+        if error is not None:
+            self.check_update_btn.setEnabled(True)
+            self.update_status.setText(f"更新下载失败：{error}")
+            QMessageBox.warning(self, "更新失败", f"下载新版本失败：{error}")
+            return
+        if not isinstance(path, Path):
+            self.check_update_btn.setEnabled(True)
+            return
+        if not getattr(sys, "frozen", False):
+            self.check_update_btn.setEnabled(True)
+            self.update_status.setText("更新已下载，但源码运行模式不能自动替换")
+            QMessageBox.information(self, "自动更新", "当前是源码运行模式，请使用打包后的 PKB.exe 进行自动更新。")
+            return
+        result = QMessageBox.question(
+            self,
+            "更新已下载",
+            f"v{update.version} 已下载并校验通过。现在退出并安装更新吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            self.check_update_btn.setEnabled(True)
+            self.update_status.setText("更新已下载，稍后可在设置页重新检查")
+            return
+        try:
+            launch_update_installer(Path(sys.executable), path)
+            self.update_status.setText("正在安装更新，PKB 将自动重启…")
+            QTimer.singleShot(500, self._quit_app)
+        except Exception as error:
+            self.check_update_btn.setEnabled(True)
+            self.update_status.setText(f"启动更新程序失败：{error}")
+            QMessageBox.warning(self, "更新失败", str(error))
+
     def _browse_data_dir(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self, "选择数据目录", self.data_dir_edit.text()
@@ -1252,7 +1398,11 @@ class MainWindow(QMainWindow):
         self.settings_status.setText("连接令牌和授权设备已重置，请让手机重新扫码。")
 
     def _save_settings(self) -> None:
-        port = int(self.port_spin.value())
+        port_text = self.port_edit.text().strip()
+        if not port_text or not port_text.isdigit() or not (1024 <= int(port_text) <= 65535):
+            self.settings_status.setText("端口必须是 1024 到 65535 之间的数字。")
+            return
+        port = int(port_text)
         data_dir_text = self.data_dir_edit.text().strip()
         if not data_dir_text:
             self.settings_status.setText("数据目录不能为空。")
@@ -1266,6 +1416,7 @@ class MainWindow(QMainWindow):
         self.config["port"] = port
         self.config["data_dir"] = str(data_dir)
         self.config["startup"] = bool(self.startup_switch.isChecked())
+        self.config["auto_update_check"] = bool(self.update_switch.isChecked())
         try:
             save_config(self.config)
             set_startup(self.config["startup"])
