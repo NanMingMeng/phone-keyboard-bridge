@@ -18,7 +18,7 @@ LOGGER = logging.getLogger("phone_keyboard.server")
 ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 MAX_IMAGE_BYTES = 30 * 1024 * 1024
 MAX_TEXT_BYTES = 512 * 1024
-MAX_FILE_BYTES = 100 * 1024 * 1024
+MAX_FILE_BYTES = 1024 * 1024 * 1024
 
 
 def safe_image_stem(name: str) -> str:
@@ -228,12 +228,28 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
                 if mode not in ("paste", "save"):
                     self._send_json(400, {"error": "Invalid mode"})
                     return
-                data = self._read_body(MAX_FILE_BYTES)
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0:
+                    raise ValueError("Empty request body")
+                if length > MAX_FILE_BYTES:
+                    self._send_json(413, {"error": "File is too large"})
+                    return
                 stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
                 filename = safe_file_name(safe_name)
                 path = settings.data_dir / "files" / f"{stamp}-{filename}"
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(data)
+                received = 0
+                try:
+                    with path.open("wb") as handle:
+                        while received < length:
+                            chunk = self.rfile.read(min(1024 * 1024, length - received))
+                            if not chunk:
+                                raise ValueError("Incomplete request body")
+                            handle.write(chunk)
+                            received += len(chunk)
+                except Exception:
+                    path.unlink(missing_ok=True)
+                    raise
                 if mode == "save":
                     self._device_state("保存文件")
                     records.add_file(path, "保存文件", True)

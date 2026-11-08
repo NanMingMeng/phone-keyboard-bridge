@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 APP_NAME = "PhoneKeyboardBridge"
-VERSION = "0.2.2"
+VERSION = "0.2.3"
 TOKEN_BYTES = 12
 
 

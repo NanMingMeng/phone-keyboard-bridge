@@ -167,6 +167,7 @@ async function sendFile(mode) {
   if (!approved) { showGate('尚未连接', '请等待电脑确认后再发送。', false); return; }
   const file = fileEl.files[0];
   if (!file) { setStatus('先选择一个文件。', true); return; }
+  if (file.size > 1024 * 1024 * 1024) { setStatus('文件不能超过 1GB。', true); return; }
   setBusy(true); setStatus(mode === 'paste' ? '正在发送文件……' : '正在保存文件……');
   try {
     const response = await fetch('/send-file', { method:'POST', headers:{...headers,'X-Filename':encodeURIComponent(file.name || 'file'),'X-Mode':mode}, body:file });
