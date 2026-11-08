@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .clipboard import copy_text, paste_image, paste_text
+from .clipboard import copy_text, paste_files, paste_image, paste_text
 from .config import Settings
 from .connections import STATUS_APPROVED, DeviceRegistry
 from .records import RecordStore
@@ -18,11 +18,22 @@ LOGGER = logging.getLogger("phone_keyboard.server")
 ALLOWED_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp"}
 MAX_IMAGE_BYTES = 30 * 1024 * 1024
 MAX_TEXT_BYTES = 512 * 1024
+MAX_FILE_BYTES = 100 * 1024 * 1024
 
 
 def safe_image_stem(name: str) -> str:
     stem = re.sub(r"[^0-9A-Za-z_-]+", "_", Path(name).stem)[:40].strip("_")
     return stem or "image"
+
+
+def safe_file_name(name: str) -> str:
+    filename = Path(name).name
+    filename = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", filename).strip(" .")
+    if not filename:
+        return "file"
+    stem = Path(filename).stem[:80].strip(" .") or "file"
+    suffix = Path(filename).suffix[:16]
+    return f"{stem}{suffix}"
 
 
 def make_handler(settings: Settings, template: str, registry: DeviceRegistry, records: RecordStore):
@@ -148,6 +159,9 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
             if self.path == "/send-image":
                 self._handle_image()
                 return
+            if self.path == "/send-file":
+                self._handle_file()
+                return
             self._send_json(404, {"error": "Not found"})
 
         def _handle_session(self, action: str | None, reset_denied: bool) -> None:
@@ -200,6 +214,46 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
             except Exception as error:
                 LOGGER.exception("Text send failed")
                 self._send_json(500, {"error": f"Text send failed: {error}"})
+
+        def _handle_file(self) -> None:
+            if not self._authorized():
+                self._send_json(403, {"error": "Invalid link", "state": "invalid_link"})
+                return
+            if not self._require_approved():
+                return
+            try:
+                raw_name = urllib.parse.unquote(self.headers.get("X-Filename", "file"))
+                safe_name = Path(raw_name).name or "file"
+                mode = self.headers.get("X-Mode", "paste")
+                if mode not in ("paste", "save"):
+                    self._send_json(400, {"error": "Invalid mode"})
+                    return
+                data = self._read_body(MAX_FILE_BYTES)
+                stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                filename = safe_file_name(safe_name)
+                path = settings.data_dir / "files" / f"{stamp}-{filename}"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+                if mode == "save":
+                    self._device_state("保存文件")
+                    records.add_file(path, "保存文件", True)
+                    self._send_json(200, {"ok": True, "saved": True, "pasted": False, "path": str(path)})
+                    return
+                try:
+                    paste_files([path])
+                except RuntimeError as error:
+                    self._device_state("粘贴文件")
+                    records.add_file(path, "粘贴文件", False, str(error))
+                    self._send_json(200, {"ok": True, "saved": True, "pasted": False, "path": str(path), "warning": str(error)})
+                    return
+                self._device_state("粘贴文件")
+                records.add_file(path, "粘贴文件", True)
+                self._send_json(200, {"ok": True, "saved": True, "pasted": True, "path": str(path)})
+            except ValueError as error:
+                self._send_json(400, {"error": str(error)})
+            except Exception as error:
+                LOGGER.exception("File send failed")
+                self._send_json(500, {"error": f"File send failed: {error}"})
 
         def _handle_image(self) -> None:
             if not self._authorized():

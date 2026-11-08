@@ -28,6 +28,17 @@ class TestRecordStore(unittest.TestCase):
             self.assertFalse(image.exists())
             self.assertEqual(store.records(), [])
 
+    def test_file_record_and_clear(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            item = root / "document.pdf"
+            item.write_bytes(b"pdf")
+            store = RecordStore(root / "records.json")
+            record = store.add_file(item, "粘贴文件", True)
+            self.assertEqual(record["type"], "file")
+            self.assertTrue(store.delete(record["id"], delete_image=True))
+            self.assertFalse(item.exists())
+
     def test_clear_removes_images(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import io
 import os
+import struct
 import time
 from pathlib import Path
 
@@ -78,6 +79,54 @@ def copy_image_to_clipboard(path: Path) -> None:
 def paste_image(path: Path) -> None:
     _require_windows("Image paste")
     copy_image_to_clipboard(path)
+    time.sleep(0.12)
+    _send_ctrl_v()
+
+
+def copy_files_to_clipboard(paths: list[Path]) -> None:
+    _require_windows("File clipboard")
+    files = [str(path.resolve()) for path in paths]
+    if not files:
+        raise RuntimeError("No files to copy")
+    data = "\0".join(files) + "\0\0"
+    payload = struct.pack("<IiiII", 20, 0, 0, 0, 1) + data.encode("utf-16le")
+
+    CF_HDROP = 15
+    GMEM_MOVEABLE = 0x0002
+    GMEM_ZEROINIT = 0x0040
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+    user32.SetClipboardData.restype = ctypes.c_void_p
+    user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+
+    if not user32.OpenClipboard(None):
+        raise RuntimeError("Cannot open the Windows clipboard")
+    try:
+        user32.EmptyClipboard()
+        size = len(payload)
+        hmem = kernel32.GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, size)
+        if not hmem:
+            raise RuntimeError("Cannot allocate clipboard memory")
+        ptr = kernel32.GlobalLock(hmem)
+        if not ptr:
+            raise RuntimeError("Cannot lock clipboard memory")
+        ctypes.memmove(ptr, payload, size)
+        kernel32.GlobalUnlock(hmem)
+        if not user32.SetClipboardData(CF_HDROP, hmem):
+            raise RuntimeError("Cannot write files to the Windows clipboard")
+    finally:
+        user32.CloseClipboard()
+
+
+def paste_files(paths: list[Path]) -> None:
+    _require_windows("File paste")
+    copy_files_to_clipboard(paths)
     time.sleep(0.12)
     _send_ctrl_v()
 

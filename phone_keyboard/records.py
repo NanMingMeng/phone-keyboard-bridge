@@ -77,6 +77,23 @@ class RecordStore:
             }
         )
 
+    def add_file(
+        self,
+        file_path: Path,
+        action: str,
+        success: bool,
+        error: str = "",
+    ) -> dict[str, Any]:
+        return self._add(
+            {
+                "type": "file",
+                "file_path": str(file_path),
+                "action": action,
+                "success": success,
+                "error": error,
+            }
+        )
+
     def records(self) -> list[dict[str, Any]]:
         with self._lock:
             return [dict(item) for item in self._records]
@@ -96,6 +113,8 @@ class RecordStore:
             self._save()
         if delete_image and found.get("type") == "image":
             self._delete_file(found.get("image_path"))
+        if delete_image and found.get("type") == "file":
+            self._delete_file(found.get("file_path"))
         return True
 
     def clear(self, delete_images: bool = True) -> None:
@@ -107,6 +126,8 @@ class RecordStore:
             for item in old_records:
                 if item.get("type") == "image":
                     self._delete_file(item.get("image_path"))
+                if item.get("type") == "file":
+                    self._delete_file(item.get("file_path"))
 
     @staticmethod
     def _delete_file(value: Any) -> None:

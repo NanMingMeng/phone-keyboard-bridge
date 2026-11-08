@@ -36,7 +36,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from phone_keyboard.clipboard import copy_image_to_clipboard, copy_text
+from phone_keyboard.clipboard import copy_files_to_clipboard, copy_image_to_clipboard, copy_text
 from phone_keyboard.cli import build_url, find_lan_ip
 from phone_keyboard.config import (
     VERSION,
@@ -1064,13 +1064,13 @@ class MainWindow(QMainWindow):
             row_layout.setContentsMargins(14, 12, 14, 12)
             row_layout.setSpacing(12)
 
-            if item.get("type") == "image":
+            if item.get("type") in ("image", "file"):
                 thumb = QLabel()
                 thumb.setFixedSize(92, 64)
                 thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                image_path = Path(str(item.get("image_path", "")))
-                if image_path.exists():
-                    pixmap = QPixmap(str(image_path)).scaled(
+                file_path = Path(str(item.get("image_path") or item.get("file_path") or ""))
+                if item.get("type") == "image" and file_path.exists():
+                    pixmap = QPixmap(str(file_path)).scaled(
                         92,
                         64,
                         Qt.AspectRatioMode.KeepAspectRatio,
@@ -1078,11 +1078,11 @@ class MainWindow(QMainWindow):
                     )
                     thumb.setPixmap(pixmap)
                 else:
-                    thumb.setText("文件已删除")
+                    thumb.setText("文件" if file_path.exists() else "文件已删除")
                     thumb.setObjectName("muted")
                 row_layout.addWidget(thumb)
-                title_text = "图片"
-                preview_text = str(item.get("action", "图片"))
+                title_text = "图片" if item.get("type") == "image" else "文件"
+                preview_text = file_path.name if file_path.name else str(item.get("action", ""))
             else:
                 title_text = "文字"
                 text = str(item.get("text", "")).replace("\n", " ")
@@ -1092,7 +1092,7 @@ class MainWindow(QMainWindow):
                 preview_label.setWordWrap(True)
                 row_layout.addWidget(preview_label, 1)
 
-            if item.get("type") == "image":
+            if item.get("type") in ("image", "file"):
                 info_col = QVBoxLayout()
                 info_col.setSpacing(2)
                 title_label = QLabel(title_text)
@@ -1140,6 +1140,9 @@ class MainWindow(QMainWindow):
                 if item.get("type") == "image":
                     copy_image_to_clipboard(Path(str(item.get("image_path", ""))))
                     self.records_summary.setText("图片已复制到剪贴板")
+                elif item.get("type") == "file":
+                    copy_files_to_clipboard([Path(str(item.get("file_path", "")))])
+                    self.records_summary.setText("文件已复制到剪贴板")
                 else:
                     copy_text(str(item.get("text", "")))
                     self.records_summary.setText("文字已复制到剪贴板")

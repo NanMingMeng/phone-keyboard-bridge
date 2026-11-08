@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 APP_NAME = "PhoneKeyboardBridge"
-VERSION = "0.2.1"
+VERSION = "0.2.2"
 TOKEN_BYTES = 12
 
 
@@ -23,6 +23,7 @@ def ensure_data_dir(path: Path) -> Path:
     path = path.expanduser().resolve()
     path.mkdir(parents=True, exist_ok=True)
     (path / "images").mkdir(exist_ok=True)
+    (path / "files").mkdir(exist_ok=True)
     (path / "logs").mkdir(exist_ok=True)
     return path
 
