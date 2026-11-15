@@ -1412,7 +1412,14 @@ class MainWindow(QMainWindow):
         if error is not None:
             self.check_update_btn.setEnabled(True)
             self.update_status.setText(f"更新下载失败：{error}")
-            QMessageBox.warning(self, "更新失败", f"下载新版本失败：{error}")
+            answer = QMessageBox.question(
+                self,
+                "更新失败",
+                f"下载新版本失败：{error}\n\n要打开 GitHub 发布页手动下载吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes and update.page_url:
+                QDesktopServices.openUrl(QUrl(update.page_url))
             return
         if not isinstance(path, Path):
             self.check_update_btn.setEnabled(True)
