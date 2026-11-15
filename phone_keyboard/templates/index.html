@@ -89,7 +89,17 @@
 <script>
 const TOKEN = __TOKEN__;
 const DEVICE_ID = (() => { let id = localStorage.getItem('pkb-device-id'); if (!id) { id = (crypto.randomUUID && crypto.randomUUID()) || ('pkb-' + Date.now() + '-' + Math.random().toString(16).slice(2)); localStorage.setItem('pkb-device-id', id); } return id; })();
-const headers = { 'X-Token': TOKEN, 'X-Device-Id': DEVICE_ID };
+const DEVICE_PRINT = (() => {
+  const ua = navigator.userAgent || '';
+  const model = (ua.match(/;\s*([A-Za-z0-9 ._+-]+?)\s+Build\//) || [])[1] || '';
+  const brand = (ua.match(/(HeyTapBrowser|MicroMessenger|MiuiBrowser|HuaweiBrowser|VivoBrowser|SamsungBrowser|EdgA|CriOS|FxiOS|Chrome|Safari|Firefox)/) || [])[1] || 'browser';
+  const platform = navigator.platform || '';
+  const lang = navigator.language || '';
+  const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (error) { return ''; } })();
+  const size = window.screen ? screen.width + 'x' + screen.height + 'x' + (screen.colorDepth || 0) : '';
+  return [model, brand, platform, lang, tz, size].join('|').slice(0, 120);
+})();
+const headers = { 'X-Token': TOKEN, 'X-Device-Id': DEVICE_ID, 'X-Device-Print': DEVICE_PRINT };
 const textEl = document.getElementById('text');
 const statusEl = document.getElementById('status');
 const connStateEl = document.getElementById('connState');
@@ -114,6 +124,18 @@ const imageBtn = document.getElementById('imageBtn');
 const sendImageBtn = document.getElementById('sendImage');
 const saveImageBtn = document.getElementById('saveImage');
 let approved = false;
+let lastActivate = Number(localStorage.getItem('pkb-activate') || '0') || 0;
+function handleActivation(seq) {
+  const value = Number(seq || 0);
+  if (!value || value === lastActivate) return;
+  lastActivate = value;
+  localStorage.setItem('pkb-activate', String(value));
+  approved = true;
+  hideGate();
+  setConnState('连接成功');
+  setStatus('电脑已打开输入界面，可以开始打字了。');
+  textEl.focus();
+}
 const saved = localStorage.getItem('phone-keyboard-text');
 if (saved) textEl.value = saved;
 textEl.addEventListener('input', () => localStorage.setItem('phone-keyboard-text', textEl.value));
@@ -126,7 +148,7 @@ async function sessionRequest(path) {
   const response = await fetch(path, { method: 'POST', headers, cache: 'no-store' });
   const data = await response.json().catch(() => ({}));
   if (!response.ok && data.state !== 'pending' && data.state !== 'denied') throw new Error(data.error || '连接失败');
-  if (data.state === 'approved') { approved = true; hideGate(); setConnState('连接成功'); return true; }
+  if (data.state === 'approved') { approved = true; hideGate(); setConnState('连接成功'); handleActivation(data.activate); return true; }
   approved = false;
   if (data.state === 'pending') { setConnState('已扫码'); showGate('已扫码，等待电脑确认', '请在电脑上的 PKB 窗口点一次“允许连接”。', false); }
   else if (data.state === 'denied') { setConnState('已拒绝'); showGate('电脑已拒绝连接', '如果你仍然需要连接，可以点下面的“重新申请”。', true); }

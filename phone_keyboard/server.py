@@ -64,6 +64,9 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
                 return None
             return value
 
+        def _device_fingerprint(self) -> str:
+            return self.headers.get("X-Device-Print", "").strip()[:128]
+
         def _device_state(self, action: str | None = None, reset_denied: bool = False) -> str | None:
             device_id = self._device_id()
             if device_id is None:
@@ -74,6 +77,7 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
                 self.headers.get("User-Agent", ""),
                 action=action,
                 reset_denied=reset_denied,
+                fingerprint=self._device_fingerprint(),
             )
 
         def _session_payload(self, state: str) -> dict[str, Any]:
@@ -87,6 +91,7 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
                         "device": item["device"],
                         "alias": item["alias"],
                         "ip": item["ip"],
+                        "activate": item.get("activate", 0),
                     }
             return {"ok": True, "state": state, "device_id": device_id}
 

@@ -296,6 +296,11 @@ class MainWindow(QMainWindow):
         devices_title.setObjectName("h2")
         self.devices_count = QLabel("0 台在线")
         self.devices_count.setObjectName("pill")
+        self.merge_devices_btn = QPushButton("合并重复设备")
+        self.merge_devices_btn.setObjectName("secondary")
+        self.merge_devices_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.merge_devices_btn.setToolTip("把同一台手机换网络后留下的重复记录合并成一条。")
+        self.merge_devices_btn.clicked.connect(self._merge_duplicate_devices)
         copy_diag_btn = QPushButton("复制诊断信息")
         copy_diag_btn.setObjectName("secondary")
         copy_diag_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -304,6 +309,7 @@ class MainWindow(QMainWindow):
         devices_header.addWidget(devices_title)
         devices_header.addWidget(self.devices_count)
         devices_header.addStretch(1)
+        devices_header.addWidget(self.merge_devices_btn)
         devices_header.addWidget(copy_diag_btn)
         devices_layout.addLayout(devices_header)
 
@@ -856,6 +862,8 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _format_ago(seconds: float) -> str:
+        if seconds <= 0:
+            return "从未连接"
         if seconds < 5:
             return "刚刚"
         if seconds < 60:
@@ -891,9 +899,13 @@ class MainWindow(QMainWindow):
         for item in connections:
             row = QFrame()
             row.setObjectName("deviceRow")
-            row_layout = QVBoxLayout(row)
+            row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(0, 10, 0, 10)
-            row_layout.setSpacing(2)
+            row_layout.setSpacing(12)
+
+            text_col = QVBoxLayout()
+            text_col.setContentsMargins(0, 0, 0, 0)
+            text_col.setSpacing(2)
 
             online = bool(item["online"])
             status = str(item["status"])
@@ -914,15 +926,26 @@ class MainWindow(QMainWindow):
             )
             device_label.setTextFormat(Qt.TextFormat.RichText)
             device_label.setObjectName("body")
-            action = str(item["last_action"] or "已连接")
+            last_ago = float(item["last_seen_ago"])
+            action = str(item["last_action"] or ("已连接" if last_ago > 0 else "尚未使用"))
             detail_label = QLabel(
                 f'{item["device"]} · {item["ip"]} · {item["request_count"]} 次操作 · '
-                f'{self._format_ago(float(item["last_seen_ago"]))} · {action}'
+                f'{self._format_ago(last_ago)} · {action}'
             )
             detail_label.setObjectName("muted")
             detail_label.setWordWrap(True)
-            row_layout.addWidget(device_label)
-            row_layout.addWidget(detail_label)
+            text_col.addWidget(device_label)
+            text_col.addWidget(detail_label)
+            row_layout.addLayout(text_col, 1)
+            if status == "approved":
+                wake_btn = QPushButton("打开打字界面")
+                wake_btn.setObjectName("secondary")
+                wake_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                wake_btn.setToolTip("手机页面还开着的话，点一下就会切回打字界面。")
+                wake_btn.clicked.connect(
+                    lambda _checked=False, device_id=str(item["device_id"]): self._activate_device(device_id)
+                )
+                row_layout.addWidget(wake_btn)
             self.device_rows_layout.addWidget(row)
         self._refresh_tray_menu()
 
@@ -1013,6 +1036,52 @@ class MainWindow(QMainWindow):
             return
         self.controller.revoke_device(device_id)
         self._refresh_approved_devices()
+        self._refresh_devices()
+
+    def _merge_duplicate_devices(self) -> None:
+        if not self.controller.is_running:
+            self.status_hint.setText("服务未运行，启动后才能整理设备记录。")
+            return
+        duplicate_count = self.controller.duplicate_device_count()
+        if duplicate_count <= 0:
+            self.status_hint.setText("没有发现重复的设备记录。")
+            return
+        result = QMessageBox.question(
+            self,
+            "合并重复设备",
+            f"发现 {duplicate_count} 条重复记录（同一台手机换网络后重复出现）。\n"
+            "合并后会保留一条，操作次数会累加。继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            return
+        merged = self.controller.merge_duplicate_devices()
+        self.status_hint.setText(f"已合并 {merged} 条重复设备记录。")
+        if self.tray is not None:
+            self.tray.showMessage(
+                "PKB",
+                f"已合并 {merged} 条重复设备记录",
+                QSystemTrayIcon.MessageIcon.Information,
+                2500,
+            )
+        self._refresh_devices()
+        self._refresh_approved_devices()
+
+    def _activate_device(self, device_id: str) -> None:
+        if not self.controller.is_running:
+            self.status_hint.setText("服务未运行，启动后才能唤醒手机。")
+            return
+        if not self.controller.activate_device(device_id):
+            self.status_hint.setText("这台设备还没有授权，先允许连接后再试。")
+            return
+        self.status_hint.setText("已通知手机打开打字界面，手机页面开着的话几秒内就会切过去。")
+        if self.tray is not None:
+            self.tray.showMessage(
+                "PKB",
+                "已通知手机打开打字界面",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000,
+            )
         self._refresh_devices()
 
     def _check_pending_requests(self) -> None:

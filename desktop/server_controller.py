@@ -46,6 +46,15 @@ class ServerController:
     def revoke_device(self, device_id: str) -> bool:
         return self._registry.revoke(device_id) if self._registry is not None else False
 
+    def duplicate_device_count(self) -> int:
+        return self._registry.duplicate_count() if self._registry is not None else 0
+
+    def merge_duplicate_devices(self) -> int:
+        return self._registry.merge_duplicates() if self._registry is not None else 0
+
+    def activate_device(self, device_id: str) -> bool:
+        return self._registry.request_activation(device_id) if self._registry is not None else False
+
     def clear_devices(self) -> None:
         if self._registry is not None:
             self._registry.clear_all()
