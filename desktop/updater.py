@@ -17,6 +17,16 @@ from PyQt6.QtCore import QThread, pyqtSignal
 RELEASE_API = "https://api.github.com/repos/NanMingMeng/phone-keyboard-bridge/releases/latest"
 USER_AGENT = "PKB-Updater"
 
+MIRROR_PREFIXES = (
+    "",
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+)
+DOWNLOAD_ATTEMPTS = 3
+CHUNK_SIZE = 256 * 1024
+MIN_SPEED_BYTES = 60 * 1024
+SLOW_CHECK_SECONDS = 20.0
+
 
 def version_tuple(value: str) -> tuple[int, ...]:
     cleaned = value.strip().lower().lstrip("v")
@@ -74,6 +84,70 @@ def check_for_update(current_version: str, timeout: float = 12.0) -> UpdateInfo 
     )
 
 
+def _sha256_of(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_checksum(checksum_url: str, timeout: float = 15.0) -> str:
+    last_error: Exception | None = None
+    for prefix in MIRROR_PREFIXES:
+        url = f"{prefix}{checksum_url}" if prefix else checksum_url
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                text = response.read().decode("utf-8", errors="replace").strip()
+            expected = text.split()[0].lower() if text else ""
+            if len(expected) == 64:
+                return expected
+            last_error = RuntimeError("发布页校验文件格式不正确")
+        except Exception as error:
+            last_error = error
+    raise RuntimeError(f"无法获取更新校验文件：{last_error}")
+
+
+def _download_to_part(
+    url: str,
+    part: Path,
+    total_size: int,
+    progress: Callable[[int, int], None] | None,
+    timeout: float = 20.0,
+) -> None:
+    existing = part.stat().st_size if part.exists() else 0
+    headers = {"User-Agent": USER_AGENT}
+    if existing:
+        headers["Range"] = f"bytes={existing}-"
+    request = urllib.request.Request(url, headers=headers)
+    started = time.time()
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        status = getattr(response, "status", 200)
+        if existing and status != 206:
+            existing = 0
+        total = total_size
+        content_length = response.headers.get("Content-Length")
+        if content_length and str(content_length).isdigit():
+            total = int(content_length) + existing
+        downloaded = existing
+        last_probe = downloaded
+        with part.open("ab" if existing else "wb") as handle:
+            while True:
+                chunk = response.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                downloaded += len(chunk)
+                if progress is not None:
+                    progress(downloaded, total)
+                if downloaded - last_probe >= 1024 * 1024:
+                    elapsed = time.time() - started
+                    if elapsed > SLOW_CHECK_SECONDS and downloaded / elapsed < MIN_SPEED_BYTES:
+                        raise RuntimeError("当前下载通道速度过低")
+                    last_probe = downloaded
+
+
 def download_and_verify(
     info: UpdateInfo,
     output_dir: Path,
@@ -82,35 +156,30 @@ def download_and_verify(
     output_dir.mkdir(parents=True, exist_ok=True)
     target = output_dir / "PKB.exe"
     part = output_dir / "PKB.exe.part"
-    checksum_request = urllib.request.Request(info.checksum_url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(checksum_request, timeout=15) as response:
-        checksum_text = response.read().decode("utf-8", errors="replace").strip()
-    expected = checksum_text.split()[0].lower() if checksum_text else ""
-    if len(expected) != 64:
-        raise RuntimeError("发布页校验文件格式不正确")
-
-    request = urllib.request.Request(info.download_url, headers={"User-Agent": USER_AGENT})
-    downloaded = 0
-    digest = hashlib.sha256()
-    with urllib.request.urlopen(request, timeout=30) as response, part.open("wb") as handle:
-        total = int(response.headers.get("Content-Length") or info.size or 0)
-        while True:
-            chunk = response.read(512 * 1024)
-            if not chunk:
-                break
-            handle.write(chunk)
-            digest.update(chunk)
-            downloaded += len(chunk)
-            if progress is not None:
-                progress(downloaded, total)
-    actual = digest.hexdigest().lower()
-    if actual != expected:
+    expected = _read_checksum(info.checksum_url)
+    last_error: Exception | None = None
+    for prefix in MIRROR_PREFIXES:
+        url = f"{prefix}{info.download_url}" if prefix else info.download_url
         part.unlink(missing_ok=True)
-        raise RuntimeError("下载文件校验失败，可能下载不完整")
-    if target.exists():
-        target.unlink()
-    part.replace(target)
-    return target
+        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+            try:
+                if progress is not None:
+                    progress(0, info.size)
+                _download_to_part(url, part, info.size, progress)
+                if info.size and part.stat().st_size != info.size:
+                    raise RuntimeError("下载文件大小与发布页不一致")
+                if _sha256_of(part).lower() != expected:
+                    part.unlink(missing_ok=True)
+                    raise RuntimeError("下载文件校验失败，可能下载不完整")
+                if target.exists():
+                    target.unlink()
+                part.replace(target)
+                return target
+            except Exception as error:
+                last_error = error
+                if attempt < DOWNLOAD_ATTEMPTS:
+                    time.sleep(1.5)
+    raise RuntimeError(f"下载更新失败：{last_error}")
 
 
 def build_update_script(current_exe: Path, new_exe: Path, wait_pid: int) -> Path:
