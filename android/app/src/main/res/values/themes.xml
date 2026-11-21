@@ -1,0 +1,10 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.PKB" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">#2F6FED</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSurface">#FFFFFF</item>
+        <item name="android:statusBarColor">#F4F6F8</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#F4F6F8</item>
+    </style>
+</resources>

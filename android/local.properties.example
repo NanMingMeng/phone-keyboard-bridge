@@ -1,0 +1,3 @@
+# 把本文件复制为 local.properties，并填入你自己的 Android SDK 路径
+# Windows 路径里的反斜杠要写成两个，或者用正斜杠
+sdk.dir=C\:\\Users\\YourName\\AppData\\Local\\Android\\Sdk

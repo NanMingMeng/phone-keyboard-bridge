@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">手机键盘桥</string>
+    <string name="setup_title">连接电脑</string>
+    <string name="setup_hint">把电脑上显示的手机地址整条粘贴到这里，例如：\nhttp://192.168.1.5:3004/?t=abc123</string>
+    <string name="setup_address">电脑地址</string>
+    <string name="setup_connect">连接</string>
+    <string name="setup_scan">扫描局域网</string>
+    <string name="setup_change">修改地址</string>
+    <string name="notif_channel_name">电脑呼叫</string>
+    <string name="notif_channel_desc">电脑请求手机打开打字界面时提醒</string>
+    <string name="notif_running">PKB 正在后台待命</string>
+    <string name="notif_call_title">电脑呼叫</string>
+    <string name="notif_call_body">点击打开打字界面</string>
+</resources>
