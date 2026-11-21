@@ -686,9 +686,23 @@ class MainWindow(QMainWindow):
         desc.setWordWrap(True)
         about_layout.addWidget(desc)
 
+        version_row = QHBoxLayout()
+        version_row.setSpacing(12)
         self.version_label = QLabel(f"版本 {VERSION}")
         self.version_label.setObjectName("muted")
-        about_layout.addWidget(self.version_label)
+        self.about_update_btn = QPushButton("检查更新")
+        self.about_update_btn.setObjectName("secondary")
+        self.about_update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.about_update_btn.clicked.connect(lambda: self._check_for_updates(silent=False))
+        version_row.addWidget(self.version_label)
+        version_row.addWidget(self.about_update_btn)
+        version_row.addStretch(1)
+        about_layout.addLayout(version_row)
+
+        self.about_update_status = QLabel("")
+        self.about_update_status.setObjectName("muted")
+        self.about_update_status.setWordWrap(True)
+        about_layout.addWidget(self.about_update_status)
 
         self.github_link = QLabel()
         self.github_link.setOpenExternalLinks(True)
@@ -1387,12 +1401,22 @@ class MainWindow(QMainWindow):
             return
         self._check_for_updates(silent=True)
 
+    def _set_update_status(self, text: str) -> None:
+        QLabel.setText(self.update_status, text)
+        if hasattr(self, "about_update_status"):
+            QLabel.setText(self.about_update_status, text)
+
+    def _set_update_buttons_enabled(self, enabled: bool) -> None:
+        self.check_update_btn.setEnabled(enabled)
+        if hasattr(self, "about_update_btn"):
+            self.about_update_btn.setEnabled(enabled)
+
     def _check_for_updates(self, silent: bool = False) -> None:
         if self._update_check_worker is not None and self._update_check_worker.isRunning():
             return
-        self.check_update_btn.setEnabled(False)
+        self._set_update_buttons_enabled(False)
         if not silent:
-            self.update_status.setText("正在检查 GitHub 上的最新版本…")
+            self._set_update_status("正在检查 GitHub 上的最新版本…")
         worker = UpdateCheckWorker(VERSION, self)
         self._update_check_worker = worker
         worker.result_ready.connect(lambda info, error: self._handle_update_check_result(info, error, silent))
@@ -1400,7 +1424,7 @@ class MainWindow(QMainWindow):
 
     def _handle_update_check_result(self, info: object, error: object, silent: bool) -> None:
         self._update_check_worker = None
-        self.check_update_btn.setEnabled(True)
+        self._set_update_buttons_enabled(True)
         self.config["last_update_check"] = time.time()
         try:
             save_config(self.config)
@@ -1408,19 +1432,19 @@ class MainWindow(QMainWindow):
             pass
         if error is not None:
             message = f"检查更新失败：{error}"
-            self.update_status.setText(message)
+            self._set_update_status(message)
             if not silent:
                 QMessageBox.warning(self, "检查更新", message)
             return
         if info is None:
-            self.update_status.setText(f"当前已是最新版本 v{VERSION}")
+            self._set_update_status(f"当前已是最新版本 v{VERSION}")
             if not silent:
                 QMessageBox.information(self, "检查更新", "当前已经是最新版本。")
             return
         update = info
         if not isinstance(update, UpdateInfo):
             return
-        self.update_status.setText(f"发现新版本 v{update.version}，当前版本 v{VERSION}")
+        self._set_update_status(f"发现新版本 v{update.version}，当前版本 v{VERSION}")
         notes = update.notes.strip()
         if len(notes) > 500:
             notes = notes[:500] + "…"
@@ -1437,8 +1461,8 @@ class MainWindow(QMainWindow):
     def _start_update_download(self, update: UpdateInfo) -> None:
         if self._update_download_worker is not None and self._update_download_worker.isRunning():
             return
-        self.check_update_btn.setEnabled(False)
-        self.update_status.setText(f"正在下载 v{update.version}…")
+        self._set_update_buttons_enabled(False)
+        self._set_update_status(f"正在下载 v{update.version}…")
         worker = UpdateDownloadWorker(update, Path(tempfile.gettempdir()) / "PKB-update", self)
         self._update_download_worker = worker
         worker.progress_changed.connect(self._update_download_progress)
@@ -1448,15 +1472,15 @@ class MainWindow(QMainWindow):
     def _update_download_progress(self, downloaded: int, total: int) -> None:
         if total > 0:
             percent = min(100, int(downloaded * 100 / total))
-            self.update_status.setText(f"正在下载更新：{percent}%")
+            self._set_update_status(f"正在下载更新：{percent}%")
         else:
-            self.update_status.setText(f"正在下载更新：{downloaded // (1024 * 1024)} MB")
+            self._set_update_status(f"正在下载更新：{downloaded // (1024 * 1024)} MB")
 
     def _handle_update_download_result(self, update: UpdateInfo, path: object, error: object) -> None:
         self._update_download_worker = None
         if error is not None:
-            self.check_update_btn.setEnabled(True)
-            self.update_status.setText(f"更新下载失败：{error}")
+            self._set_update_buttons_enabled(True)
+            self._set_update_status(f"更新下载失败：{error}")
             answer = QMessageBox.question(
                 self,
                 "更新失败",
@@ -1467,11 +1491,11 @@ class MainWindow(QMainWindow):
                 QDesktopServices.openUrl(QUrl(update.page_url))
             return
         if not isinstance(path, Path):
-            self.check_update_btn.setEnabled(True)
+            self._set_update_buttons_enabled(True)
             return
         if not getattr(sys, "frozen", False):
-            self.check_update_btn.setEnabled(True)
-            self.update_status.setText("更新已下载，但源码运行模式不能自动替换")
+            self._set_update_buttons_enabled(True)
+            self._set_update_status("更新已下载，但源码运行模式不能自动替换")
             QMessageBox.information(self, "自动更新", "当前是源码运行模式，请使用打包后的 PKB.exe 进行自动更新。")
             return
         result = QMessageBox.question(
@@ -1481,16 +1505,16 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if result != QMessageBox.StandardButton.Yes:
-            self.check_update_btn.setEnabled(True)
-            self.update_status.setText("更新已下载，稍后可在设置页重新检查")
+            self._set_update_buttons_enabled(True)
+            self._set_update_status("更新已下载，稍后可在设置页重新检查")
             return
         try:
             launch_update_installer(Path(sys.executable), path)
-            self.update_status.setText("正在安装更新，PKB 将自动重启…")
+            self._set_update_status("正在安装更新，PKB 将自动重启…")
             QTimer.singleShot(500, self._quit_app)
         except Exception as error:
-            self.check_update_btn.setEnabled(True)
-            self.update_status.setText(f"启动更新程序失败：{error}")
+            self._set_update_buttons_enabled(True)
+            self._set_update_status(f"启动更新程序失败：{error}")
             QMessageBox.warning(self, "更新失败", str(error))
 
     def _browse_data_dir(self) -> None:
