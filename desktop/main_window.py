@@ -1071,14 +1071,25 @@ class MainWindow(QMainWindow):
         if not self.controller.is_running:
             self.status_hint.setText("服务未运行，启动后才能唤醒手机。")
             return
+        device = next(
+            (item for item in self.controller.connections() if item["device_id"] == device_id),
+            None,
+        )
         if not self.controller.activate_device(device_id):
             self.status_hint.setText("这台设备还没有授权，先允许连接后再试。")
             return
-        self.status_hint.setText("已通知手机打开打字界面，手机页面开着的话几秒内就会切过去。")
+        if device is not None and not device.get("online"):
+            self.status_hint.setText(
+                "这台手机现在不在线，信号已排队；它下次打开页面会自动进入打字界面。"
+            )
+            message = "手机不在线，唤醒信号已排队"
+        else:
+            self.status_hint.setText("已通知手机，几秒内手机页面会震动并弹出「电脑已呼叫」提示。")
+            message = "已通知手机打开打字界面"
         if self.tray is not None:
             self.tray.showMessage(
                 "PKB",
-                "已通知手机打开打字界面",
+                message,
                 QSystemTrayIcon.MessageIcon.Information,
                 2000,
             )

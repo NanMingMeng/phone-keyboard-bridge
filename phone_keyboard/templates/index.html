@@ -38,6 +38,10 @@
   button:disabled { opacity:.48; cursor:default; }
   svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
   .gate { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center; padding:24px; background:rgba(244,246,248,.96); backdrop-filter:blur(8px); }
+  .wake-banner { position:fixed; top:0; left:0; right:0; z-index:70; transform:translateY(-120%); transition:transform .28s cubic-bezier(.2,.8,.2,1); background:linear-gradient(135deg,#2f6fed,#0a84ff); color:#fff; padding:calc(14px + env(safe-area-inset-top)) 16px 14px; font-size:15px; font-weight:700; text-align:center; box-shadow:0 10px 28px rgba(47,111,237,.38); }
+  .wake-banner.show { transform:translateY(0); }
+  body.wake-active textarea { border-color:var(--primary); box-shadow:0 0 0 4px rgba(47,111,237,.28); }
+  body.wake-active .conn-pill { background:var(--primary); color:#fff; }
   .gate-panel { width:100%; max-width:420px; padding:24px; background:var(--card); border-radius:22px; border:1px solid var(--border); text-align:center; box-shadow:0 20px 60px rgba(15,23,42,.14); }
   .gate-title { margin:0 0 8px; font-size:20px; font-weight:700; }
   .gate-detail { margin:0; color:var(--muted); font-size:14px; line-height:1.65; }
@@ -85,6 +89,7 @@
   </div>
 </div>
 <div class="gate" id="gate"><div class="gate-panel"><h2 class="gate-title" id="gateTitle">正在连接电脑…</h2><p class="gate-detail" id="gateDetail">请保持手机和电脑在同一个网络。</p><button class="retry-btn" id="retry">重新申请</button></div></div>
+<div class="wake-banner" id="wakeBanner">电脑已呼叫这台手机，可以开始打字了</div>
 <footer>Phone Keyboard Bridge v__VERSION__ · LAN only</footer>
 <script>
 const TOKEN = __TOKEN__;
@@ -125,6 +130,37 @@ const sendImageBtn = document.getElementById('sendImage');
 const saveImageBtn = document.getElementById('saveImage');
 let approved = false;
 let lastActivate = Number(localStorage.getItem('pkb-activate') || '0') || 0;
+const wakeBanner = document.getElementById('wakeBanner');
+let wakeTimer = null;
+function beep() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  const ctx = new Ctx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'sine';
+  osc.frequency.value = 880;
+  gain.gain.value = 0.05;
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.16);
+  setTimeout(() => { try { ctx.close(); } catch (error) {} }, 600);
+}
+function flashWake() {
+  try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch (error) {}
+  try { beep(); } catch (error) {}
+  document.body.classList.add('wake-active');
+  wakeBanner.classList.add('show');
+  if (wakeTimer) clearTimeout(wakeTimer);
+  wakeTimer = setTimeout(() => {
+    wakeBanner.classList.remove('show');
+    document.body.classList.remove('wake-active');
+  }, 2600);
+  const originalTitle = '手机键盘桥';
+  document.title = '⚡ 电脑呼叫中';
+  setTimeout(() => { document.title = originalTitle; }, 2600);
+}
 function handleActivation(seq) {
   const value = Number(seq || 0);
   if (!value || value === lastActivate) return;
@@ -132,10 +168,14 @@ function handleActivation(seq) {
   localStorage.setItem('pkb-activate', String(value));
   approved = true;
   hideGate();
-  setConnState('连接成功');
-  setStatus('电脑已打开输入界面，可以开始打字了。');
+  setConnState('已连接 · 电脑呼叫');
+  setStatus('电脑已呼叫这台手机，可以开始打字了。');
+  flashWake();
   textEl.focus();
 }
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) syncSession();
+});
 const saved = localStorage.getItem('phone-keyboard-text');
 if (saved) textEl.value = saved;
 textEl.addEventListener('input', () => localStorage.setItem('phone-keyboard-text', textEl.value));
