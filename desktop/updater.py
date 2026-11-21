@@ -15,6 +15,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 
 RELEASE_API = "https://api.github.com/repos/NanMingMeng/phone-keyboard-bridge/releases/latest"
+RELEASE_LIST_API = "https://api.github.com/repos/NanMingMeng/phone-keyboard-bridge/releases?per_page=30"
 USER_AGENT = "PKB-Updater"
 
 MIRROR_PREFIXES = (
@@ -54,13 +55,24 @@ class UpdateInfo:
     size: int
 
 
-def check_for_update(current_version: str, timeout: float = 12.0) -> UpdateInfo | None:
+def _fetch_json(url: str, timeout: float) -> object:
     request = urllib.request.Request(
-        RELEASE_API,
-        headers={"User-Agent": f"{USER_AGENT}/{current_version}", "Accept": "application/vnd.github+json"},
+        url,
+        headers={
+            "User-Agent": f"{USER_AGENT}/check",
+            "Accept": "application/vnd.github+json",
+        },
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        data = json.load(response)
+        return json.load(response)
+
+
+def _update_from_release(data: object, current_version: str) -> UpdateInfo | None:
+    """把一条发布记录转成更新信息；没有 PKB.exe 资产的一律跳过。"""
+    if not isinstance(data, dict):
+        return None
+    if data.get("draft") or data.get("prerelease"):
+        return None
     tag = str(data.get("tag_name", ""))
     if not tag or not is_newer(tag, current_version):
         return None
@@ -71,7 +83,7 @@ def check_for_update(current_version: str, timeout: float = 12.0) -> UpdateInfo 
     exe = by_name.get("PKB.exe")
     checksum = by_name.get("PKB.exe.sha256")
     if not exe or not checksum:
-        raise RuntimeError("最新版本缺少 PKB.exe 或校验文件")
+        return None
     return UpdateInfo(
         version=tag.lstrip("vV"),
         tag=tag,
@@ -82,6 +94,38 @@ def check_for_update(current_version: str, timeout: float = 12.0) -> UpdateInfo 
         checksum_url=str(checksum.get("browser_download_url") or ""),
         size=int(exe.get("size") or 0),
     )
+
+
+def check_for_update(current_version: str, timeout: float = 12.0) -> UpdateInfo | None:
+    """在所有发布里找最新的、真正带桌面版安装包的版本。
+
+    不能只看 releases/latest：仓库里也会发安卓版，那些发布没有 PKB.exe，
+    被当成"最新"时会误报"缺少 PKB.exe"。
+    """
+    candidates: list[object] = []
+    errors: list[Exception] = []
+    try:
+        candidates.append(_fetch_json(RELEASE_API, timeout))
+    except Exception as error:
+        errors.append(error)
+    try:
+        listing = _fetch_json(RELEASE_LIST_API, timeout)
+        if isinstance(listing, list):
+            candidates.extend(listing)
+    except Exception as error:
+        errors.append(error)
+    if not candidates:
+        detail = errors[-1] if errors else "网络不可用"
+        raise RuntimeError(f"检查更新失败：{detail}")
+
+    best: UpdateInfo | None = None
+    for data in candidates:
+        info = _update_from_release(data, current_version)
+        if info is None:
+            continue
+        if best is None or version_tuple(info.version) > version_tuple(best.version):
+            best = info
+    return best
 
 
 def _sha256_of(path: Path) -> str:
