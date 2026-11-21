@@ -14,7 +14,7 @@
 > 下载 Windows 版：[GitHub Releases](https://github.com/NanMingMeng/phone-keyboard-bridge/releases/latest)
 
 > 适合不想用电脑键盘，但必须在 Codex、微信、浏览器、编辑器里打字的人。
-> 不需要安装手机 App，不需要云服务，数据只走你自己的局域网。
+> 手机端不装 App 也能用（浏览器打开页面即可），装了 App 体验更顺；不需要云服务，数据只走你自己的局域网。
 
 ![手机端界面](docs/screenshot.png)
 
@@ -121,7 +121,46 @@ PKB 分成两部分，**电脑版是主体，手机版是可选配件**：
 
 它不会读取你的屏幕，不会上传文件，也不会连接外部服务器。图片和日志只保存在本机数据目录。
 
-## 安装
+## 安装（三步）
+
+### 第 1 步：装电脑版（必须）
+
+1. 打开下载页：<https://github.com/NanMingMeng/phone-keyboard-bridge/releases/latest>
+2. 下载 `PKB.exe`
+3. 双击运行。如果 Windows 提示「已保护你的电脑」，点「更多信息」→「仍要运行」
+4. 打开后服务会自动启动，窗口里会出现二维码和一行手机地址
+
+> 第一次运行时 Windows 防火墙可能弹窗，勾选「专用网络」并允许，否则手机连不上。
+
+### 第 2 步：手机连上（二选一）
+
+**方式 A：手机浏览器（不用装任何东西，最省事）**
+
+1. 手机扫描电脑窗口里的二维码，或手动打开那行手机地址
+2. 电脑会弹出「新的设备请求连接」，点「允许连接」
+3. 手机页面变成打字界面，就可以开始打字了
+
+**方式 B：装手机版 App（体验更好，可选）**
+
+1. 从同一个下载页下载 `PKB-android-1.0.7.apk`
+2. 传到手机上安装（需要允许「未知来源安装」）
+3. 打开 App，把电脑上的地址整条粘贴进去，或者点「扫描局域网」自动找电脑
+4. 第一次同样要在电脑上点一次「允许连接」
+5. 允许通知权限
+
+两种方式都能用，区别见上面的「两个版本，按需取用」表格。
+
+### 第 3 步：让手机在后台也能收到呼叫（可选）
+
+**用手机版 App**：在 App 里允许通知即可，不需要装证书。建议再到系统设置里把这个 App 的电池优化设为「不限制」，否则后台可能被系统杀掉。
+
+**用手机浏览器**：浏览器规定只有 HTTPS 页面才能发系统通知，需要装一次本地证书。按页面顶部「一键开启系统通知」的三步操作即可，详见上面的「系统通知（可选）」章节。
+
+---
+
+## 从源码运行（开发者）
+
+普通用户不需要看这一节，用上面的 `PKB.exe` 就够了。
 
 ### 环境要求
 
@@ -130,7 +169,7 @@ PKB 分成两部分，**电脑版是主体，手机版是可选配件**：
 - 手机和电脑在同一个 Wi-Fi / 热点下
 - 电脑不能睡眠，否则手机连不上
 
-### 方式一：桌面版（推荐）
+### 方式一：脚本启动（推荐）
 
 1. 安装 Python 3.10+。
 2. 下载或克隆本项目。
@@ -144,11 +183,7 @@ PKB 分成两部分，**电脑版是主体，手机版是可选配件**：
 python run_desktop.py
 ```
 
-### 方式二：使用打包好的 exe
-
-下载 `PKB.exe` 后双击即可，不需要安装 Python。
-
-### 方式三：命令行版
+### 方式二：命令行版
 
 ```powershell
 git clone https://github.com/NanMingMeng/phone-keyboard-bridge.git
@@ -291,7 +326,7 @@ tests/            基础测试
 
 ## English
 
-Phone Keyboard Bridge lets you type on your phone and paste into the active window on a Windows PC over your local network. It also supports image upload with automatic clipboard paste when the target app accepts images. The included PKB desktop app manages the local service, QR code, settings, and logs in one window. No cloud service, no mobile app, and no screen capture.
+Phone Keyboard Bridge lets you type on your phone and paste into the active window on a Windows PC over your local network. It also supports image upload with automatic clipboard paste when the target app accepts images. The included PKB desktop app manages the local service, QR code, settings, and logs in one window. No cloud service and no screen capture. The Android app is optional and only improves the experience.
 
 Windows 10/11 is required for automatic paste and image clipboard support. The HTTP server and text copy mode also run on other platforms, but automatic paste is Windows-only.
 
