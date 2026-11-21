@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import secrets
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 APP_NAME = "PhoneKeyboardBridge"
-VERSION = "0.2.7"
+VERSION = "0.3.0"
 TOKEN_BYTES = 12
 
 
@@ -55,3 +55,5 @@ class Settings:
     log_file: Path
     template_file: Path
     version: str = VERSION
+    https_port: int = 0
+    ca_cert: Path | None = None

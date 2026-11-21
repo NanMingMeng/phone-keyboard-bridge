@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import re
+import ssl
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -51,6 +52,19 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
+
+        def _send_ca_cert(self) -> None:
+            ca_path = settings.ca_cert
+            if ca_path is None or not ca_path.exists():
+                self._send_json(404, {"error": "证书尚未生成"})
+                return
+            data = ca_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-x509-ca-cert")
+            self.send_header("Content-Disposition", 'attachment; filename="pkb-ca.crt"')
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
         def _authorized(self) -> bool:
             return self.headers.get("X-Token") == settings.token
@@ -136,6 +150,18 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
                 self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
                 self.send_header("Pragma", "no-cache")
                 self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if parsed.path == "/pkb-ca.crt":
+                self._send_ca_cert()
+                return
+            if parsed.path == "/sw.js":
+                body = SERVICE_WORKER_JS.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
                 self.wfile.write(body)
                 return
@@ -336,14 +362,34 @@ class _Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
+SERVICE_WORKER_JS = """
+self.addEventListener('install', function (event) { self.skipWaiting(); });
+self.addEventListener('activate', function (event) { event.waitUntil(self.clients.claim()); });
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        if ('focus' in list[i]) { return list[i].focus(); }
+      }
+      if (self.clients.openWindow) { return self.clients.openWindow('/'); }
+    })
+  );
+});
+"""
+
+
 def create_server(
     settings: Settings,
     template: str,
     registry: DeviceRegistry,
     records: RecordStore,
+    ssl_context: ssl.SSLContext | None = None,
 ) -> ThreadingHTTPServer:
     handler = make_handler(settings, template, registry, records)
     server = _Server((settings.host, settings.port), handler)
+    if ssl_context is not None:
+        server.socket = ssl_context.wrap_socket(server.socket, server_side=True)
     server.registry = registry
     server.records = records
     return server

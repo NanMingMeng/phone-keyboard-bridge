@@ -370,6 +370,12 @@ class MainWindow(QMainWindow):
         hint.setObjectName("muted")
         hint.setWordWrap(True)
         qr_right.addWidget(hint)
+
+        self.notify_hint = QLabel("")
+        self.notify_hint.setObjectName("muted")
+        self.notify_hint.setWordWrap(True)
+        self.notify_hint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        qr_right.addWidget(self.notify_hint)
         qr_right.addStretch(1)
         qr_layout.addLayout(qr_right, 1)
         layout.addWidget(self.qr_card)
@@ -828,6 +834,7 @@ class MainWindow(QMainWindow):
         url = build_url(find_lan_ip(), int(self.config["port"]), self.token)
         self.phone_url = url
         self.url_label.setText(url)
+        self._refresh_notify_hint()
         try:
             image = qrcode.make(url)
             buffer = io.BytesIO()
@@ -843,6 +850,23 @@ class MainWindow(QMainWindow):
             )
         except Exception as error:
             self.url_label.setText(f"二维码生成失败：{error}")
+
+    def _refresh_notify_hint(self) -> None:
+        if not hasattr(self, "notify_hint"):
+            return
+        https_port = int(getattr(self.controller, "https_port", 0) or 0)
+        if not https_port:
+            self.notify_hint.setText("HTTPS 未启动，手机端系统通知不可用。")
+            return
+        ip = find_lan_ip()
+        https_url = f"https://{ip}:{https_port}/?t={self.token}"
+        ca_url = f"http://{ip}:{int(self.config['port'])}/pkb-ca.crt"
+        self.notify_hint.setText(
+            "想要「切出去也能收到」的系统通知，分三步：\n"
+            f"1. 手机打开 {ca_url} 下载证书，到系统设置里安装为「CA 证书」\n"
+            f"2. 用这个地址打开手机页面：{https_url}\n"
+            "3. 页面顶部点一次「开启系统通知」"
+        )
 
     def _copy_phone_url(self) -> None:
         if self.phone_url:
