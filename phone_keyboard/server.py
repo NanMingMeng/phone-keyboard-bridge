@@ -66,6 +66,21 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
             self.end_headers()
             self.wfile.write(data)
 
+        def _send_android_cert(self) -> None:
+            cert_path = settings.android_cert
+            if cert_path is None or not cert_path.exists():
+                self._send_json(404, {"error": "系统证书尚未生成"})
+                return
+            data = cert_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/x-x509-ca-cert")
+            self.send_header(
+                "Content-Disposition", f'attachment; filename="{cert_path.name}"'
+            )
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
         def _authorized(self) -> bool:
             return self.headers.get("X-Token") == settings.token
 
@@ -155,6 +170,9 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
                 return
             if parsed.path == "/pkb-ca.crt":
                 self._send_ca_cert()
+                return
+            if parsed.path == "/pkb-ca-system":
+                self._send_android_cert()
                 return
             if parsed.path == "/sw.js":
                 body = SERVICE_WORKER_JS.encode("utf-8")

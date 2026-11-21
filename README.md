@@ -1,5 +1,14 @@
 # 手机键盘桥 / Phone Keyboard Bridge
 
+> **关于本项目**
+>
+> 本项目由 **NanMing** 开发并开源，采用 MIT 许可证。
+>
+> 转载、修改、二次分发时，请保留作者署名和原项目地址：
+> **https://github.com/NanMingMeng/phone-keyboard-bridge**
+>
+> 如果你用它改出了自己的版本，欢迎在说明里写一句"基于 NanMing 的手机键盘桥"。
+
 用手机给 Windows 电脑打字：手机浏览器打开一个局域网页面，输入文字或选择图片，电脑当前窗口自动收到粘贴内容。
 
 > 下载 Windows 版：[GitHub Releases](https://github.com/NanMingMeng/phone-keyboard-bridge/releases/latest)
@@ -58,6 +67,22 @@
 - 粘贴成功后手机输入框自动清空
 - 支持 Windows 10/11
 - 支持打包成单个 exe
+
+## 系统通知（可选）
+
+手机切出去用别的软件时，在电脑上点一下设备，可以让手机在通知栏弹出消息、响铃、震动。
+
+浏览器规定只有 HTTPS 页面才能调用系统通知，所以要一次性装一个本地证书：
+
+1. 手机打开 `http://电脑IP:3004`，点页面顶部「一键开启系统通知」，会看到三步教程
+2. 点「下载证书」，关掉下载面板（教程会一直在），按教程到手机设置里装成「CA 证书」
+3. 回到页面点「装好了，去通知版页面」，打开 HTTPS 地址，点「开启系统通知」授权
+
+装完以后不用重复操作。换网络导致电脑 IP 变化时，证书会用同一个 CA 自动重签，手机不需要重装。
+
+**手机已 root**：可以跳过手动安装，直接访问 `http://电脑IP:3004/pkb-ca-system` 下载系统证书，或者运行 `scripts\install-system-cert.ps1` 用 adb 一键装进 `/system/etc/security/cacerts/`，重启后生效。
+
+**不想装证书**：普通 http 页面照样能用，只是没有系统通知，呼叫时只有页面内提示。
 
 ## 工作原理
 

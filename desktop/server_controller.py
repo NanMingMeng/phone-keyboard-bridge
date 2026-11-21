@@ -7,7 +7,7 @@ from dataclasses import replace
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from phone_keyboard.certs import ensure_certificates
+from phone_keyboard.certs import ensure_certificates, export_android_cert
 from phone_keyboard.cli import find_lan_ip
 from phone_keyboard.config import Settings
 from phone_keyboard.connections import DeviceRegistry
@@ -28,6 +28,7 @@ class ServerController:
         self._lock = threading.Lock()
         self.https_port: int = 0
         self.ca_cert: Path | None = None
+        self.android_cert: Path | None = None
 
     @property
     def is_running(self) -> bool:
@@ -101,6 +102,11 @@ class ServerController:
             LOGGER.warning("HTTPS 证书加载失败，仅使用 HTTP：%s", error)
             return None
         self.ca_cert = ca_cert
+        try:
+            self.android_cert = export_android_cert(cert_dir, ca_cert)
+        except Exception as error:
+            LOGGER.warning("导出 Android 系统证书失败：%s", error)
+            self.android_cert = None
         return context
 
     def start(self, settings: Settings, template: str) -> tuple[bool, str | None]:
@@ -113,6 +119,7 @@ class ServerController:
                 settings,
                 https_port=https_port if ssl_context is not None else 0,
                 ca_cert=self.ca_cert,
+                android_cert=self.android_cert,
             )
             try:
                 registry = DeviceRegistry(settings.data_dir / "approved_devices.json")

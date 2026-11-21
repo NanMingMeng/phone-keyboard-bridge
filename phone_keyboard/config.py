@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 APP_NAME = "PhoneKeyboardBridge"
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 TOKEN_BYTES = 12
 
 
@@ -57,3 +57,4 @@ class Settings:
     version: str = VERSION
     https_port: int = 0
     ca_cert: Path | None = None
+    android_cert: Path | None = None

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import ipaddress
 from pathlib import Path
 
@@ -134,6 +135,22 @@ def _cert_hosts(cert_path: Path) -> set[str]:
     hosts = {str(ip) for ip in san.get_values_for_type(x509.IPAddress)}
     hosts.update(name for name in san.get_values_for_type(x509.DNSName))
     return hosts
+
+
+def subject_hash_old(cert: x509.Certificate) -> str:
+    """Android 系统证书要求的文件名：OpenSSL 旧式 subject hash。"""
+    digest = hashlib.md5(cert.subject.public_bytes()).digest()
+    return f"{int.from_bytes(digest[:4], 'little'):08x}"
+
+
+def export_android_cert(cert_dir: Path, ca_cert_path: Path) -> Path:
+    """导出 Android 系统证书目录可直接使用的 <hash>.0 文件（root 用户用）。"""
+    cert = x509.load_pem_x509_certificate(ca_cert_path.read_bytes())
+    target_dir = cert_dir / "android"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / f"{subject_hash_old(cert)}.0"
+    target.write_bytes(ca_cert_path.read_bytes())
+    return target
 
 
 def ensure_certificates(cert_dir: Path, hosts: list[str]) -> tuple[Path, Path, Path]:

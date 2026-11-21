@@ -859,13 +859,23 @@ class MainWindow(QMainWindow):
             self.notify_hint.setText("HTTPS 未启动，手机端系统通知不可用。")
             return
         ip = find_lan_ip()
+        port = int(self.config["port"])
         https_url = f"https://{ip}:{https_port}/?t={self.token}"
-        ca_url = f"http://{ip}:{int(self.config['port'])}/pkb-ca.crt"
+        ca_url = f"http://{ip}:{port}/pkb-ca.crt"
+        android_cert = getattr(self.controller, "android_cert", None)
+        root_hint = ""
+        if android_cert is not None:
+            root_hint = (
+                f"\n\n手机已 root 的话可以省掉手动安装：下载系统证书 "
+                f"http://{ip}:{port}/pkb-ca-system ，"
+                "或运行 scripts\\install-system-cert.ps1 用 adb 一键装成系统证书。"
+            )
         self.notify_hint.setText(
             "想要「切出去也能收到」的系统通知，分三步：\n"
             f"1. 手机打开 {ca_url} 下载证书，到系统设置里安装为「CA 证书」\n"
             f"2. 用这个地址打开手机页面：{https_url}\n"
             "3. 页面顶部点一次「开启系统通知」"
+            f"{root_hint}"
         )
 
     def _copy_phone_url(self) -> None:
