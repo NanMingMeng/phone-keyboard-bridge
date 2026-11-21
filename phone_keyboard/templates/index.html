@@ -64,6 +64,7 @@
   <p>先在电脑上点一下目标输入框，再在手机上打字、选图片或发送文件。</p>
   <div class="conn-pill" id="connState">等待连接</div>
   <button class="notify-btn" id="notifyBtn">开启系统通知</button>
+  <button class="notify-btn" id="enableNotifyBtn">一键开启系统通知</button>
 </header>
 <main>
   <textarea id="text" autofocus placeholder="在这里打字，支持中文输入法和语音输入……"></textarea>
@@ -91,7 +92,7 @@
     <input type="file" id="file" hidden>
   </div>
 </div>
-<div class="gate" id="gate"><div class="gate-panel"><h2 class="gate-title" id="gateTitle">正在连接电脑…</h2><p class="gate-detail" id="gateDetail">请保持手机和电脑在同一个网络。</p><button class="retry-btn" id="retry">重新申请</button></div></div>
+<div class="gate" id="gate"><div class="gate-panel"><h2 class="gate-title" id="gateTitle">正在连接电脑…</h2><p class="gate-detail" id="gateDetail">请保持手机和电脑在同一个网络。</p><button class="retry-btn" id="retry">重新申请</button><button class="retry-btn" id="gotoHttps" style="display:none;">装好了，去通知版页面</button></div></div>
 <div class="wake-banner" id="wakeBanner">电脑已呼叫这台手机，可以开始打字了</div>
 <footer>Phone Keyboard Bridge v__VERSION__ · LAN only</footer>
 <script>
@@ -140,13 +141,45 @@ let swReg = null;
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('/sw.js').then((reg) => { swReg = reg; }).catch(() => {});
 }
+const enableNotifyBtn = document.getElementById('enableNotifyBtn');
+const gotoHttpsBtn = document.getElementById('gotoHttps');
+function httpsUrlForCurrent() {
+  if (location.protocol !== 'http:') return '';
+  const port = Number(location.port || '80');
+  if (!port) return '';
+  return 'https://' + location.hostname + ':' + (port + 1) + location.search;
+}
 function refreshNotifyButton() {
-  if (!('Notification' in window) || !window.isSecureContext) {
+  const secure = window.isSecureContext;
+  enableNotifyBtn.classList.toggle('visible', !secure && Boolean(httpsUrlForCurrent()));
+  if (!('Notification' in window) || !secure) {
     notifyBtn.classList.remove('visible');
     return;
   }
   notifyBtn.classList.toggle('visible', Notification.permission === 'default');
 }
+enableNotifyBtn.addEventListener('click', () => {
+  const target = httpsUrlForCurrent();
+  if (!target) {
+    setStatus('这个地址不支持通知版，请用电脑上显示的地址打开。', true);
+    return;
+  }
+  const link = document.createElement('a');
+  link.href = '/pkb-ca.crt';
+  link.download = 'pkb-ca.crt';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  gateTitle.textContent = '第 1 步：安装证书';
+  gateDetail.innerHTML = '证书正在下载。请在手机设置里搜索「安装证书」，选「CA 证书」安装下载好的 pkb-ca.crt。<br>装好后点下面的按钮进入通知版页面。';
+  retryBtn.classList.remove('visible');
+  gotoHttpsBtn.style.display = 'block';
+  gate.style.display = 'flex';
+});
+gotoHttpsBtn.addEventListener('click', () => {
+  const target = httpsUrlForCurrent();
+  if (target) location.href = target;
+});
 notifyBtn.addEventListener('click', async () => {
   try {
     const result = await Notification.requestPermission();
