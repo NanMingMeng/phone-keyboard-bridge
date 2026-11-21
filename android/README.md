@@ -10,42 +10,61 @@
 
 ## 功能
 
-- 首次粘贴电脑上显示的手机地址（含令牌），或点「扫描局域网」自动找电脑
+- **扫码连接**：直接扫电脑 PKB 窗口里的二维码，扫到就自动连（CameraX + ZXing，无需 Google 服务）
+- **继续上次的连接**：连过一次之后，重新打开 App 直接回到打字页，不用重扫
+- **连接条件与常见问题**：首次进入默认展开，写明三种连法（同一 Wi‑Fi / 电脑连手机热点 / 手机连电脑热点）、防火墙要点、换网络后要重扫
+- 也可以手动粘贴电脑上显示的手机地址（含令牌），或扫描局域网自动找电脑
 - 内嵌网页视图加载打字页面，文字、图片、文件发送全部与浏览器版一致
 - 前台服务每 3 秒询问一次电脑，被呼叫时发原生通知（响铃 + 震动）
 - 通知点击直接回到打字界面
 - 设备身份固定，只需在电脑上授权一次
+- App 图标与名称与电脑端 PKB 保持一致（自适应图标，深色/浅色启动器通用）
+- **连不上不会白屏**：连之前先探 1.5 秒端口，失败或网页加载出错都会退回连接页并给出排查提示
 
 ## 环境要求
 
 - Android 8.0（API 26）及以上
-- JDK 17
-- Android SDK（compileSdk 35、build-tools 34.0.0）
+- JDK 17 或更高
+- Android SDK（compileSdk 34、build-tools 34.0.0 及以上）
 - Gradle 8.9
+
+> 说明：之所以是 compileSdk 34 而不是 35，是因为部分自编译的 aarch64 aapt2 读不了 platform-35 的 `android.jar`（`RES_TABLE_TYPE_TYPE entry offsets overlap`）。如果本机 aapt2 正常，可以自行改回 35。
 
 ## 构建
 
 ```bash
-# 1. 复制并填写 SDK 路径
-copy local.properties.example local.properties
+# 1. 写 SDK 路径
+echo "sdk.dir=/path/to/Android/sdk" > local.properties
 
-# 2. 构建 debug 包
-gradle assembleDebug
+# 2. 构建（未配置签名时输出 app-release-unsigned.apk）
+./gradlew assembleRelease
 
 # 产物
-app/build/outputs/apk/debug/app-debug.apk
+app/build/outputs/apk/release/app-release.apk
 ```
 
-Windows 下如果没有把 Gradle 加进 PATH，可以直接用完整路径：
+### 签名（可选）
 
-```powershell
-$env:JAVA_HOME='C:\path\to\jdk-17'
-& 'C:\path\to\gradle-8.9\bin\gradle.bat' assembleDebug
+签名材料**不入库**。在 `local.properties` 里写：
+
+```properties
+pkb.storeFile=app/pkb.jks
+pkb.storePassword=******
+pkb.keyAlias=pkb
+pkb.keyPassword=******
+```
+
+也支持环境变量：`PKB_KEYSTORE` / `PKB_STORE_PASSWORD` / `PKB_KEY_ALIAS` / `PKB_KEY_PASSWORD`。
+都没配置时 `assembleRelease` 只出未签名包，自己用 `apksigner` 签即可：
+
+```bash
+zipalign -f -p 4 app-release-unsigned.apk app-aligned.apk
+apksigner sign --ks my.jks --out app-release.apk app-aligned.apk
 ```
 
 ## 安装
 
-把 `app-debug.apk` 传到手机，点开安装，允许「未知来源」。首次打开需要粘贴电脑上显示的完整地址，例如：
+把 APK 传到手机点开安装，允许「未知来源」。首次打开：点「扫码连接」扫电脑窗口里的二维码，或在「手动输入地址」里粘贴完整地址：
 
 ```
 http://192.168.1.5:3004/?t=abcdef123456
@@ -54,21 +73,24 @@ http://192.168.1.5:3004/?t=abcdef123456
 ## 使用要点
 
 1. 首次打开会弹「新设备请求连接」，在电脑上点允许，只此一次
-2. 允许通知权限
+2. 允许通知权限（Android 13+）与相机权限（扫码用）
 3. 建议在系统设置里把这个 App 的电池优化设为「不限制」，否则后台可能被系统杀掉
-4. 手机和电脑必须在同一个局域网
+4. 手机和电脑必须能互相访问：同一个 Wi‑Fi，或电脑连手机开的热点（最稳）
+5. 打字页按返回 = 退回桌面（连接不丢），下次打开自动回到打字页
 
-## 技术说明
+## 目录
 
-| 文件 | 作用 |
-|---|---|
-| `MainActivity.kt` | 配置界面、内嵌网页视图、局域网扫描、通知权限申请 |
-| `PollService.kt` | 前台服务，轮询 `/heartbeat`，发现呼叫序号变化就发通知 |
-| `Prefs.kt` | 保存电脑地址、令牌、设备号、上次呼叫序号 |
-
-App 的设备和网页页面共用同一个设备号：App 生成一个固定 ID，页面加载后通过脚本写入 `localStorage`，所以电脑上只需要授权一次。
-
-## 许可证
-
-与主项目相同，MIT。转载、修改、二次分发请保留作者署名和原项目地址：
-https://github.com/NanMingMeng/phone-keyboard-bridge
+```
+android/
+├── app/
+│   ├── build.gradle.kts          # 版本号、依赖、签名读取逻辑
+│   └── src/main/
+│       ├── AndroidManifest.xml
+│       ├── java/com/nanming/pkb/
+│       │   ├── MainActivity.kt   # 连接页 + 网页容器 + 错误兜底
+│       │   ├── QrScanActivity.kt # 扫码（CameraX + ZXing）
+│       │   ├── Prefs.kt          # 地址/令牌/设备 ID/最近连接状态
+│       │   └── PollService.kt    # 前台轮询 + 系统通知
+│       └── res/                  # 布局、图标、字符串
+└── README.md
+```

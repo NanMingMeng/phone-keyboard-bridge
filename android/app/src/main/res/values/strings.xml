@@ -1,12 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">手机键盘桥</string>
+    <string name="app_name">PKB</string>
+    <string name="setup_tagline">手机键盘桥 · 局域网打字</string>
     <string name="setup_title">连接电脑</string>
+    <string name="setup_sub">扫电脑上 PKB 窗口的二维码，或把手机地址整条粘贴进来</string>
+    <string name="setup_net_hint">网络怎么连：同一 Wi‑Fi，或电脑连你手机开的热点（都行）</string>
+    <string name="setup_tip">手机和电脑要能互相访问：同一个 Wi‑Fi，或者电脑连手机热点</string>
+    <string name="setup_help_toggle">连接条件与常见问题</string>
+    <string name="setup_help_hide">收起说明</string>
+    <string name="setup_help_body">支持的三种连法，任选一种：\n\n1）同一个 Wi‑Fi\n手机和电脑连同一个路由器。注意：校园网、公司网、酒店网常开「设备隔离」，会连不上。\n\n2）电脑连手机热点（最稳，推荐）\n手机打开「个人热点」，让电脑连上这个热点。手机自己的 Wi‑Fi 可以关掉，走流量也行。\n\n3）手机连电脑热点\n电脑开移动热点，手机连上电脑的热点，效果同上。\n\n每次都要做的三件事：\n· 电脑上的 PKB 保持运行（关窗口会缩到托盘继续跑）\n· 第一次连时，Windows 防火墙弹窗要点「允许」，并且勾上「专用网络」\n· 手机上看不到电脑，或者换了 Wi‑Fi／热点，IP 会变，重新扫一次电脑上的二维码即可\n\n连上之后手机页面上如果一片空白，点右上角「修改地址」就能回到这一页，重新扫码。</string>
     <string name="setup_hint">把电脑上显示的手机地址整条粘贴到这里，例如：\nhttp://192.168.1.5:3004/?t=abc123</string>
     <string name="setup_address">电脑地址</string>
     <string name="setup_connect">连接</string>
+    <string name="setup_resume">继续上次的连接</string>
+    <string name="setup_qr">扫码连接</string>
     <string name="setup_scan">扫描局域网</string>
     <string name="setup_change">修改地址</string>
+    <string name="setup_manual_toggle">手动输入地址 / 扫描局域网</string>
+    <string name="setup_manual_hide">收起手动输入</string>
+    <string name="qr_hint">把电脑 PKB 窗口里的二维码放进框内</string>
+    <string name="qr_close">关闭</string>
+    <string name="qr_need_camera">需要相机权限才能扫码，请在系统设置里允许</string>
+    <string name="qr_invalid">扫到的内容不是电脑地址，已填入输入框，请检查</string>
     <string name="notif_channel_name">电脑呼叫</string>
     <string name="notif_channel_desc">电脑请求手机打开打字界面时提醒</string>
     <string name="notif_running">PKB 正在后台待命</string>

@@ -19,6 +19,11 @@ class Prefs(context: Context) {
         get() = sp.getString("token", "") ?: ""
         set(value) = sp.edit().putString("token", value).apply()
 
+    /** 上一次是否真正加载成功过；失败/从未成功时启动直接停在连接页，避免白屏。 */
+    var lastOk: Boolean
+        get() = sp.getBoolean("last_ok", false)
+        set(value) = sp.edit().putBoolean("last_ok", value).apply()
+
     var deviceId: String
         get() {
             val existing = sp.getString("device_id", "") ?: ""

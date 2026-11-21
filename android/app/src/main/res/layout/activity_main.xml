@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F4F6F8">
+    android:background="@drawable/bg_screen">
 
     <WebView
         android:id="@+id/webView"
@@ -13,87 +14,275 @@
     <ScrollView
         android:id="@+id/setupScroll"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:fillViewport="true">
 
         <LinearLayout
             android:id="@+id/setupPanel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="22dp"
-            android:background="@drawable/bg_card"
             android:orientation="vertical"
-            android:padding="22dp">
+            android:paddingLeft="20dp"
+            android:paddingTop="26dp"
+            android:paddingRight="20dp"
+            android:paddingBottom="24dp">
+
+            <ImageView
+                android:layout_width="62dp"
+                android:layout_height="62dp"
+                android:layout_gravity="center_horizontal"
+                android:contentDescription="@string/app_name"
+                android:src="@drawable/ic_launcher" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/setup_title"
-                android:textColor="#1F2933"
-                android:textSize="20sp"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="10dp"
+                android:letterSpacing="0.04"
+                android:text="@string/app_name"
+                android:textColor="#15223A"
+                android:textSize="24sp"
                 android:textStyle="bold" />
 
             <TextView
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="把电脑上显示的手机地址整条粘贴进来，或者点下面扫描局域网。"
-                android:textColor="#66727F"
-                android:textSize="13sp" />
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="2dp"
+                android:text="@string/setup_tagline"
+                android:textColor="#76839A"
+                android:textSize="12sp" />
 
-            <EditText
-                android:id="@+id/addressInput"
+            <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:gravity="top"
-                android:hint="@string/setup_hint"
-                android:inputType="textUri"
-                android:minLines="2"
-                android:textSize="14sp" />
+                android:layout_marginTop="18dp"
+                app:cardBackgroundColor="#FFFFFF"
+                app:cardCornerRadius="26dp"
+                app:cardElevation="3dp"
+                app:strokeColor="#E6ECF7"
+                app:strokeWidth="1dp">
 
-            <Button
-                android:id="@+id/connectBtn"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:text="@string/setup_connect" />
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="18dp">
 
-            <Button
-                android:id="@+id/scanBtn"
-                style="?attr/materialButtonOutlinedStyle"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/setup_scan" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/setup_title"
+                        android:textColor="#15223A"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
 
-            <TextView
-                android:id="@+id/setupStatus"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
-                android:textColor="#66727F"
-                android:textSize="13sp" />
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:lineSpacingExtra="3dp"
+                        android:text="@string/setup_sub"
+                        android:textColor="#76839A"
+                        android:textSize="13sp" />
 
-            <TextView
-                android:id="@+id/foundList"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:textColor="#2F6FED"
-                android:textSize="14sp" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/resumeBtn"
+                        style="@style/Widget.Material3.Button.TonalButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="48dp"
+                        android:layout_marginTop="14dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/setup_resume"
+                        android:textColor="#1D4FD8"
+                        android:textSize="14sp"
+                        android:visibility="gone"
+                        app:backgroundTint="#E8F0FF"
+                        app:cornerRadius="16dp"
+                        app:icon="@drawable/ic_link"
+                        app:iconGravity="textStart"
+                        app:iconPadding="8dp"
+                        app:iconTint="#1D4FD8" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/qrBtn"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:layout_marginTop="14dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/setup_qr"
+                        android:textSize="15sp"
+                        app:backgroundTint="#2F6BFF"
+                        app:cornerRadius="16dp"
+                        app:icon="@drawable/ic_qr"
+                        app:iconGravity="textStart"
+                        app:iconPadding="8dp"
+                        app:iconTint="#FFFFFF" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/helpToggle"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="52dp"
+                        android:layout_marginTop="10dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/setup_help_toggle"
+                        android:textColor="#2F6BFF"
+                        android:textSize="15sp"
+                        app:cornerRadius="16dp"
+                        app:icon="@drawable/ic_info"
+                        app:iconGravity="textStart"
+                        app:iconPadding="8dp"
+                        app:iconTint="#2F6BFF"
+                        app:strokeColor="#C9D6EE" />
+
+                    <LinearLayout
+                        android:id="@+id/helpBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:background="@drawable/bg_help"
+                        android:orientation="vertical"
+                        android:padding="14dp"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:lineSpacingExtra="4dp"
+                            android:text="@string/setup_help_body"
+                            android:textColor="#4A5A73"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/manualToggle"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:layout_gravity="center_horizontal"
+                        android:layout_marginTop="4dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:text="@string/setup_manual_toggle"
+                        android:textColor="#5B6B85"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:id="@+id/manualBox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <com.google.android.material.textfield.TextInputLayout
+                            style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:hint="@string/setup_address"
+                            app:boxBackgroundColor="#F7F9FD"
+                            app:boxCornerRadiusBottomEnd="14dp"
+                            app:boxCornerRadiusBottomStart="14dp"
+                            app:boxCornerRadiusTopEnd="14dp"
+                            app:boxCornerRadiusTopStart="14dp"
+                            app:boxStrokeColor="#C9D6EE"
+                            app:startIconDrawable="@drawable/ic_link"
+                            app:startIconTint="#9AA8BF">
+
+                            <com.google.android.material.textfield.TextInputEditText
+                                android:id="@+id/addressInput"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:gravity="top|start"
+                                android:inputType="textUri"
+                                android:maxLines="4"
+                                android:minLines="2"
+                                android:textColor="#15223A"
+                                android:textSize="14sp" />
+                        </com.google.android.material.textfield.TextInputLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/connectBtn"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:layout_marginTop="10dp"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:text="@string/setup_connect"
+                            android:textSize="14sp"
+                            app:cornerRadius="16dp"
+                            app:icon="@drawable/ic_link"
+                            app:iconGravity="textStart"
+                            app:iconPadding="8dp"
+                            app:iconTint="#2F6BFF"
+                            app:strokeColor="#C9D6EE" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/scanBtn"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="40dp"
+                            android:layout_gravity="center_horizontal"
+                            android:insetTop="0dp"
+                            android:insetBottom="0dp"
+                            android:text="@string/setup_scan"
+                            android:textColor="#5B6B85"
+                            android:textSize="12sp"
+                            app:icon="@drawable/ic_wifi"
+                            app:iconGravity="textStart"
+                            app:iconPadding="6dp"
+                            app:iconSize="16dp"
+                            app:iconTint="#5B6B85" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/setupStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:lineSpacingExtra="2dp"
+                        android:textColor="#76839A"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/foundList"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:textColor="#2F6BFF"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
         </LinearLayout>
     </ScrollView>
 
-    <Button
+    <com.google.android.material.button.MaterialButton
         android:id="@+id/changeBtn"
+        style="@style/Widget.Material3.Button.TextButton"
         android:layout_width="wrap_content"
         android:layout_height="36dp"
         android:layout_gravity="top|end"
-        android:layout_margin="8dp"
+        android:layout_margin="10dp"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
         android:minWidth="0dp"
         android:paddingLeft="12dp"
         android:paddingRight="12dp"
         android:text="@string/setup_change"
+        android:textColor="#5B6B85"
         android:textSize="12sp"
-        android:visibility="gone" />
+        android:visibility="gone"
+        app:icon="@drawable/ic_link"
+        app:iconGravity="textStart"
+        app:iconPadding="6dp"
+        app:iconSize="14dp"
+        app:iconTint="#5B6B85" />
+
 </FrameLayout>
