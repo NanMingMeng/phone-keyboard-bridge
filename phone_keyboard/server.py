@@ -113,7 +113,8 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
         def _session_payload(self, state: str) -> dict[str, Any]:
             device_id = self._device_id() or ""
             for item in registry.snapshot():
-                if item["device_id"] == device_id:
+                known_ids = item.get("device_ids") or [item["device_id"]]
+                if device_id in known_ids:
                     return {
                         "ok": True,
                         "state": state,

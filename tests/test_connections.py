@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,8 +62,11 @@ class TestDeviceRegistry(unittest.TestCase):
             self.assertEqual(state, STATUS_APPROVED)
             approved = registry.approved()
             self.assertEqual(len(approved), 1)
-            self.assertEqual(approved[0]["device_id"], "new-id")
+            # 老记录是主 id，新 id 作为别名挂在同一台设备上，两边都能继续用
+            self.assertEqual(approved[0]["device_id"], "old-id")
+            self.assertIn("new-id", approved[0]["device_ids"])
             self.assertEqual(approved[0]["alias"], "我的手机")
+            self.assertEqual(approved[0]["identity"], "android:plc110")
 
     def test_different_fingerprint_still_waits(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -87,20 +91,47 @@ class TestDeviceRegistry(unittest.TestCase):
             self.assertGreater(approved[0]["last_seen"], 0)
             self.assertEqual(approved[0]["request_count"], 1)
 
-    def test_merge_duplicates(self):
+    def test_legacy_duplicates_merged_on_load(self):
         with tempfile.TemporaryDirectory() as directory:
-            registry = DeviceRegistry(Path(directory) / "devices.json")
+            path = Path(directory) / "devices.json"
             ua = "Mozilla/5.0 (Linux; Android 16) HeyTapBrowser/40.10.10.9"
-            # 模拟升级前留下的历史记录：没有指纹，UA 相同
-            registry.touch("id-1", "10.0.0.2", ua, "申请连接")
-            registry.approve("id-1", "我的手机")
-            registry.touch("id-2", "10.0.0.3", ua, "申请连接")
-            registry.approve("id-2", "我的手机2")
-            self.assertEqual(registry.duplicate_count(), 1)
-            self.assertEqual(registry.merge_duplicates(), 1)
+            legacy = {
+                "devices": [
+                    {
+                        "device_id": "id-1",
+                        "alias": "我的手机",
+                        "user_agent": ua,
+                        "fingerprint": "",
+                        "first_seen": 1000.0,
+                        "last_seen": 2000.0,
+                        "request_count": 5,
+                        "last_action": "申请连接",
+                        "approved_at": 1000.0,
+                        "activate_seq": 0,
+                    },
+                    {
+                        "device_id": "id-2",
+                        "alias": "我的手机2",
+                        "user_agent": ua,
+                        "fingerprint": "",
+                        "first_seen": 1100.0,
+                        "last_seen": 1900.0,
+                        "request_count": 3,
+                        "last_action": "粘贴文字",
+                        "approved_at": 1100.0,
+                        "activate_seq": 0,
+                    },
+                ]
+            }
+            path.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+            registry = DeviceRegistry(path)
             approved = registry.approved()
             self.assertEqual(len(approved), 1)
+            self.assertEqual(approved[0]["device_id"], "id-1")
+            self.assertIn("id-2", approved[0]["device_ids"])
+            self.assertEqual(approved[0]["request_count"], 8)
             self.assertEqual(registry.duplicate_count(), 0)
+            self.assertEqual(registry.merge_duplicates(), 0)
 
     def test_merge_skips_distinct_fingerprints(self):
         with tempfile.TemporaryDirectory() as directory:
