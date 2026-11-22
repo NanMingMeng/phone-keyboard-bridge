@@ -12,6 +12,7 @@ from typing import Any
 
 from .clipboard import copy_text, paste_files, paste_image, paste_text
 from .config import Settings
+from .focus import foreground_title
 from .connections import STATUS_APPROVED, DeviceRegistry
 from .records import RecordStore
 
@@ -121,8 +122,14 @@ def make_handler(settings: Settings, template: str, registry: DeviceRegistry, re
                         "alias": item["alias"],
                         "ip": item["ip"],
                         "activate": item.get("activate", 0),
+                        "focus": foreground_title(),
                     }
-            return {"ok": True, "state": state, "device_id": device_id}
+            return {
+                "ok": True,
+                "state": state,
+                "device_id": device_id,
+                "focus": foreground_title(),
+            }
 
         def _require_approved(self) -> bool:
             state = self._device_state()

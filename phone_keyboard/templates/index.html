@@ -297,6 +297,10 @@ if (saved) textEl.value = saved;
 textEl.addEventListener('input', () => localStorage.setItem('phone-keyboard-text', textEl.value));
 function setStatus(message, isError) { statusEl.textContent = message; statusEl.classList.toggle('error', !!isError); }
 function setConnState(text) { connStateEl.textContent = text; }
+function focusText(focus) {
+  const t = (focus || '').trim();
+  return t ? ('连接成功 · ' + t) : '连接成功';
+}
 function showGate(title, detail, canRetry) { if (guideOpen) return; gateTitle.textContent = title; gateDetail.textContent = detail; retryBtn.classList.toggle('visible', !!canRetry); gate.style.display = 'flex'; }
 function hideGate() { gate.style.display = 'none'; }
 function setBusy(value) { [pasteBtn, copyBtn, clearBtn, imageBtn, sendImageBtn, saveImageBtn].forEach(btn => btn.disabled = value); }
@@ -304,7 +308,7 @@ async function sessionRequest(path) {
   const response = await fetch(path, { method: 'POST', headers, cache: 'no-store' });
   const data = await response.json().catch(() => ({}));
   if (!response.ok && data.state !== 'pending' && data.state !== 'denied') throw new Error(data.error || '连接失败');
-  if (data.state === 'approved') { approved = true; hideGate(); setConnState('连接成功'); handleActivation(data.activate); return true; }
+  if (data.state === 'approved') { approved = true; hideGate(); setConnState(focusText(data.focus)); handleActivation(data.activate); return true; }
   approved = false;
   if (data.state === 'pending') { setConnState('已扫码'); showGate('已扫码，等待电脑确认', '请在电脑上的 PKB 窗口点一次“允许连接”。', false); }
   else if (data.state === 'denied') { setConnState('已拒绝'); showGate('电脑已拒绝连接', '如果你仍然需要连接，可以点下面的“重新申请”。', true); }
