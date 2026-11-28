@@ -80,6 +80,7 @@
 <main>
   <textarea id="text" autofocus placeholder="在这里打字，支持中文输入法和语音输入……"></textarea>
   <label class="row"><input type="checkbox" id="enter"> 粘贴后按回车发送</label>
+  <label class="row"><input type="checkbox" id="autonum"> 自动序号（1) 2) 3)…）</label>
   <div class="preview-wrap" id="previewWrap"><img id="preview" alt="图片预览"></div>
   <p class="status" id="status"></p>
   <p class="hint">如果文字或图片去了错误的地方，先在电脑上点一下目标输入框，再重试一次。</p>
@@ -121,7 +122,9 @@ const DEVICE_PRINT = (() => {
   return [model, brand, platform, lang, tz, size].join('|').slice(0, 120);
 })();
 const headers = { 'X-Token': TOKEN, 'X-Device-Id': DEVICE_ID, 'X-Device-Print': DEVICE_PRINT };
-const textEl = document.getElementById('text');
+const textEl = document.getElementById('text')
+const autoNumEl = document.getElementById('autonum');
+const AUTONUM_KEY = 'phone-keyboard-autonum';;
 const statusEl = document.getElementById('status');
 const connStateEl = document.getElementById('connState');
 const enterEl = document.getElementById('enter');
@@ -292,9 +295,111 @@ function handleActivation(seq) {
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) syncSession();
 });
+/* ================= 自动序号 ================= */
+const NUM_RE = /^(\d+)\)\s?/;
+let numSeeding = false;
+
+function saveTextValue() {
+  localStorage.setItem('phone-keyboard-text', textEl.value);
+}
+
+function setCaret(pos) {
+  const p = Math.max(0, Math.min(pos, textEl.value.length));
+  textEl.setSelectionRange(p, p);
+}
+
+/* 把所有以 “N) ” 开头的行按顺序重排为 1) 2) 3)… */
+function renumberLines() {
+  const lines = textEl.value.split('\n');
+  let n = 1, changed = false;
+  const out = lines.map(line => {
+    const m = line.match(NUM_RE);
+    if (!m) return line;
+    const want = n + ') ' + line.slice(m[0].length);
+    if (want !== line) changed = true;
+    n++;
+    return want;
+  });
+  if (changed) textEl.value = out.join('\n');
+  return changed;
+}
+
+/* 开启序号模式且内容为空时，填入 “1) ” */
+function seedNumber(force) {
+  if (!autoNumEl.checked) return;
+  if (force || textEl.value === '') {
+    numSeeding = true;
+    textEl.value = '1) ';
+    saveTextValue();
+    setCaret(textEl.value.length);
+    numSeeding = false;
+  }
+}
+
+/* 恢复开关状态 */
+if (localStorage.getItem(AUTONUM_KEY) === '1') autoNumEl.checked = true;
+
 const saved = localStorage.getItem('phone-keyboard-text');
 if (saved) textEl.value = saved;
-textEl.addEventListener('input', () => localStorage.setItem('phone-keyboard-text', textEl.value));
+
+/* 开启模式但记录为空时补上 1) */
+if (autoNumEl.checked) {
+  if (!textEl.value.trim()) {
+    textEl.value = '1) ';
+    saveTextValue();
+  } else {
+    renumberLines();
+  }
+}
+
+textEl.addEventListener('input', () => {
+  if (numSeeding) return;
+  saveTextValue();
+  // 序号模式下，被删空时自动补回 1)
+  if (autoNumEl.checked && textEl.value === '') {
+    seedNumber(true);
+  }
+});
+
+/* 回车：插入新行 + 重排后续序号 + 光标落到新行序号后 */
+textEl.addEventListener('keydown', (e) => {
+  if (!autoNumEl.checked) return;
+  if (e.key !== 'Enter') return;
+  if (e.isComposing || e.keyCode === 229) return;   // 输入法组字中不处理
+  if (e.ctrlKey || e.metaKey) return;               // 保留 Ctrl+Enter 之类
+  e.preventDefault();
+
+  const pos = textEl.selectionStart;
+  const before = textEl.value.slice(0, pos);
+  const after = textEl.value.slice(pos);
+  const newLineIdx = before.split('\n').length;    // 新行在重排后的索引
+
+  // 用 0) 作占位，交给 renumberLines 统一编号
+  textEl.value = before + '\n0) ' + after;
+  renumberLines();
+  saveTextValue();
+
+  // 光标定位到新行序号之后
+  const lines = textEl.value.split('\n');
+  let offset = 0;
+  for (let i = 0; i < newLineIdx && i < lines.length; i++) offset += lines[i].length + 1;
+  const cur = lines[newLineIdx] || '';
+  const m = cur.match(NUM_RE);
+  setCaret(offset + (m ? m[0].length : 0));
+});
+
+/* 开关切换 */
+autoNumEl.addEventListener('change', () => {
+  localStorage.setItem(AUTONUM_KEY, autoNumEl.checked ? '1' : '0');
+  if (autoNumEl.checked) {
+    if (!textEl.value.trim()) seedNumber(true);
+    else renumberLines();
+    setStatus('自动序号已开启，回车自动接下一行。');
+  } else {
+    setStatus('自动序号已关闭。');
+  }
+  textEl.focus();
+});
 function setStatus(message, isError) { statusEl.textContent = message; statusEl.classList.toggle('error', !!isError); }
 function setConnState(text) { connStateEl.textContent = text; }
 function focusText(focus) {
@@ -326,7 +431,7 @@ async function sendText(mode) {
     const response = await fetch('/send', { method:'POST', headers:{...headers,'Content-Type':'application/json'}, body:JSON.stringify({text,mode,enter:enterEl.checked}) });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || '发送失败');
-    if (mode === 'paste') { textEl.value = ''; localStorage.removeItem('phone-keyboard-text'); textEl.focus(); setStatus('已粘贴到电脑，输入框已清空。'); }
+    if (mode === 'paste') { textEl.value = ''; localStorage.removeItem('phone-keyboard-text'); if (autoNumEl.checked) { seedNumber(true); } textEl.focus(); setStatus('已粘贴到电脑，输入框已清空。'); }
     else setStatus('已复制到电脑剪贴板。');
   } catch (error) { setStatus(error.message || '发送失败', true); } finally { setBusy(false); }
 }
@@ -365,7 +470,7 @@ function resetImageSelection() { imageEl.value = ''; previewEl.removeAttribute('
 function resetFileSelection() { fileEl.value = ''; fileActions.classList.remove('visible'); }
 pasteBtn.addEventListener('click', () => sendText('paste'));
 copyBtn.addEventListener('click', () => sendText('copy'));
-clearBtn.addEventListener('click', () => { textEl.value = ''; localStorage.removeItem('phone-keyboard-text'); textEl.focus(); setStatus('已清空。'); });
+clearBtn.addEventListener('click', () => { textEl.value = ''; localStorage.removeItem('phone-keyboard-text'); if (autoNumEl.checked) { seedNumber(true); } textEl.focus(); setStatus('已清空。'); });
 imageBtn.addEventListener('click', () => imageEl.click());
 imageEl.addEventListener('change', () => { const file = imageEl.files[0]; if (!file) { resetImageSelection(); return; } resetFileSelection(); previewEl.src = URL.createObjectURL(file); previewWrap.classList.add('visible'); imageActions.classList.add('visible'); setStatus('已选择图片：' + file.name + '。请选择“粘贴图片”或“只保存图片”。'); });
 sendImageBtn.addEventListener('click', () => sendImage('paste'));

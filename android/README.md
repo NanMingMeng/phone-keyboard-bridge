@@ -45,6 +45,8 @@
 
 ## 构建
 
+> 本仓库**不带** `gradle/wrapper/gradle-wrapper.jar`（二进制不入库）：用 Android Studio 打开 `android/` 目录，首次会自动生成 wrapper；本机已有 Gradle 时也可以先执行 `gradle wrapper --gradle-version 8.9` 生成，再跑下面的命令。
+
 ```bash
 # 1. 写 SDK 路径
 echo "sdk.dir=/path/to/Android/sdk" > local.properties
